@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <style>:root{--cp-bg:#f7f4ef;--cp-accent:#b11f4b;--cp-border:#dedede;--cp-text:#242424}</style>
+  <rect width="512" height="512" rx="104" fill="var(--cp-bg)"/>
+  <ellipse cx="256" cy="256" rx="174" ry="152" fill="none" stroke="var(--cp-border)" stroke-width="3"/>
+  <ellipse cx="256" cy="256" rx="184" ry="64" transform="rotate(-28 256 256)" fill="none" stroke="var(--cp-accent)" stroke-width="7"/>
+  <path d="M145 256c48-91 141-91 197 0-56 91-149 91-197 0Z" fill="var(--cp-bg)" stroke="var(--cp-accent)" stroke-width="12" stroke-linejoin="round"/>
+  <path d="m342 256 44-52v104Z" fill="var(--cp-bg)" stroke="var(--cp-accent)" stroke-width="12" stroke-linejoin="round"/>
+  <path d="m210 198 38-35 41 36" fill="var(--cp-bg)" stroke="var(--cp-accent)" stroke-width="10" stroke-linejoin="round"/>
+  <circle cx="194" cy="246" r="10" fill="var(--cp-text)"/>
+  <circle cx="368" cy="154" r="13" fill="var(--cp-accent)"/>
+</svg>

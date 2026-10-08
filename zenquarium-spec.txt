@@ -1,0 +1,685 @@
+ZENQUARIUM — Complete Application Specification
+=================================================
+
+Build a premium, single-file HTML application called "Zenquarium" — a meditative aquarium simulation that is also a game. The ENTIRE application must be self-contained in one index.html file with inline CSS and JavaScript. No external dependencies, no frameworks, no CDN links. It should work by simply opening the file in a modern browser.
+
+The app is approximately 7,700+ lines and consists of an animated splash/theme-selection screen, a full-screen aquarium simulation with scoring, achievements, creatures, and game-over/victory conditions. Everything renders with SVG, CSS animations, Canvas, and the Web Audio API.
+
+=== ARCHITECTURE ===
+
+Single index.html with three sections:
+1. <style> block — all CSS (~1,900 lines)
+2. HTML body — splash screen, about overlay, achievements overlay, game screen with tank, HUD, controls, modals, session summary
+3. <script> block — JavaScript (~5,500 lines) organized as IIFEs/modules:
+   - Utils (utility functions: rand, randInt, clamp, lerp, pick, svgEl, htmlEl)
+   - ZenStorage (localStorage persistence layer)
+   - ZenAudio (Web Audio API synthesized sound system)
+   - Themes (5 theme definitions with fish types, colors, creatures)
+   - Fish class (detailed SVG fish with trait-based AI behavior)
+   - FishFactory (simple factory wrapper)
+   - Tank (environment: caustics, light rays, plants, particles, bubbles)
+   - Food (food flakes system)
+   - Creatures (creature visitors: jellyfish, octopus, squid with hunting/eating behavior)
+   - Achievements (20 achievements with session tracking and score bonuses)
+   - UI (splash screen with animated tetras, HUD, modals, status messages, session summary)
+   - App (game state, game loop, scoring, milestones, game-over, auto mode, reproduction)
+
+=== SPLASH SCREEN ===
+
+Full-screen dark oceanic splash (linear-gradient: #0d1b2a → #1b2838 → #0a1628) with:
+- Title "ZENQUARIUM" in large (4rem), elegant uppercase, gradient gold text (#e8dcc8 to #c9a96e via linear-gradient 135deg), with a subtle shimmer animation (background-size shifting)
+- Subtitle "A meditative aquarium experience" below in muted text (var(--text-secondary)), with 64px bottom margin to separate from content below
+- Animated rising bubble particles: 15 small circles with radial gradient, rising from bottom to top with staggered timing
+
+Planted Background (full-bleed, z-index 0):
+- Dense plant forest across the full width of the splash screen (not just sides)
+- 15 position groups spanning the screen: x positions at 1%, 5%, 10%, 16%, 22%, 30%, 40%, 50%, 60%, 70%, 78%, 84%, 90%, 95%, 99%
+- Plants are tallest on the edges (250-450px) tapering to shortest in the center (30-80px)
+- Each position group has 1-5 plants (more on edges, fewer in center)
+- Each plant: a 3px stem (CSS div) with 3-7 alternating leaves (rounded leaf shapes with sway animation)
+- Plant palette: deep greens (#2d5a3a, #1a3d28, #1e4830, #264d34, #1b3825) with lighter leaf tips
+- 50 small carpet plants scattered along the bottom (radial gradient ellipses)
+- Plants sway gently (CSS animation: plantSway 6-12s, leafSway 5-10s)
+- Opacity varies 0.35-0.7 for depth layering
+
+Animated Neon Tetras (z-index 1, behind content):
+- 3 neon tetras rendered on individual HTML5 canvas elements
+- Each tetra uses game-fish-style AI movement:
+  * Pick random targets anywhere in the viewport (8-92% vertical range)
+  * Move toward target with lerped velocity (Utils.lerp, smoothing 0.1)
+  * Occasional darts at 2.5-4× speed (15% chance)
+  * Soft boundary repulsion at screen edges
+  * Face direction of movement (scaleX flip)
+- Canvas drawing matches the game's neon tetra design:
+  * Slim body ellipse (bodyRx = w×0.42, bodyRy = h×0.25) in #a8c8d8
+  * Neon blue lateral stripe (#00d4ff with glow) from nose to mid-body
+  * Red rear stripe (#e83030) from mid-body to tail
+  * Tail fin (#88b0c8) with wag animation (Math.sin(tailPhase))
+  * Dorsal and pectoral fins, white eye with dark pupil, subtle mouth
+- Three tetras at scales 0.9, 0.75, 0.65 starting at different positions
+- Animation starts/stops with splash visibility; canvases resize on window resize
+- On returning to splash from game, canvases are resized after visibility to prevent 0-dimension bug
+
+Splash Content (z-index 2, above plants and tetras):
+- All text, buttons, and cards are interactive and clickable above the fish
+
+Theme Selection:
+- "PICK A THEME TO START" label in uppercase, letterspaced
+- 5 theme cards in a horizontal grid (5 columns), each showing theme name and short description
+- Cards have gradient backgrounds matching their theme colors:
+  * Koi Garden: #1a3a5c → #2a1f14
+  * Tropical Reef: #0a4a6e → #3a2a18
+  * Deep Ocean: #060d18 → #0a0f18
+  * Zen Garden: #1a1a1a → #1a1810
+  * Pen & Ink: #2a2a3a → #1a1520 (cool blue-violet tint to distinguish from Zen Garden)
+- Hover effect: lift (-4px translateY), shadow, border glow (rgba(232,220,200,0.4))
+- Click directly starts the game (no separate "Begin" button)
+- Last-played theme gets a subtle "Last played" badge from ZenStorage
+
+Footer area with:
+- "About" button — opens about overlay
+- "Achievements" button — opens achievements overlay
+- Mute button (🔊/🔇 emoji toggle) — controls splash screen ambient sound
+
+Stats Ribbon (below footer):
+- Three stat items: Best Score (with best milestone badge if any), Sessions count, Achievements unlocked/total
+- Best milestone shows emoji + tier name (e.g., "🥇 Gold")
+
+Mobile (≤480px): Plants scale to 60%, tetras at 70% opacity, title 1.8rem, subtitle margin 36px
+Mobile (≤360px): subtitle margin 28px, cards single column
+
+Splash ambient audio:
+- Starts on first user click/keydown (AudioContext gesture requirement)
+- Soft filtered noise (water presence, lpf 150Hz, hpf 30Hz, gain 0.15)
+- Tonal drone on C2 (65Hz) and G2 (97.5Hz) open fifth, sine waves with slow vibrato
+- Occasional gentle chime tones (C5, E5, G5, C6) every ~4 seconds at 40% probability
+- Stops when entering game, restarts when returning to splash (unless muted)
+
+Transition: splash fades out (opacity 0, slight scale up) over 1 second before showing game screen.
+
+=== GAME SCREEN ===
+
+Full-screen aquarium tank with layered visual elements (ordered by z-index):
+
+1. WATER EFFECTS SVG (z-index 1):
+   - Caustic light patterns: 12 semi-transparent ellipses in upper 60%, shimmer animation (opacity 0.04-0.12, 4-8s). Initial CSS opacity 0.06.
+   - Light rays: 5 trapezoidal polygons from surface (70% height), opacity 0.05-0.12
+   - SVG defs: caustics displacement filter, bubble gradient, light-ray gradient
+
+2. PARTICLES LAYER (z-index 2):
+   - 15 tiny floating particles (1-3px) drifting upward with horizontal movement
+
+3. PLANTS LAYER (z-index 3):
+   - 8-14 aquatic plants anchored to bottom with curved SVG paths, themed colors, gentle sway animation
+   - Ink theme: thinner strokes (1-2.5px)
+
+4. FISH LAYER (z-index 5):
+   - SVG layer for all fish and creatures
+
+5. FOOD LAYER (z-index 6):
+   - SVG layer for food flakes
+
+6. BUBBLES LAYER (z-index 8):
+   - Rising bubble circles, spawned periodically
+
+7. SURFACE RIPPLES (z-index 10):
+   - 6px strip at top with animated gradient
+
+8. TANK CLOUDINESS OVERLAY (z-index 12):
+   - Full-tank div with murky gradient, opacity driven by tank health
+   - Formula: cloudiness = max(0, (70 - tankHealth) / 70) × 0.7
+
+9. VIGNETTE (z-index 15):
+   - Radial gradient darkening edges
+
+10. GLASS REFLECTION (z-index 16):
+    - Subtle diagonal light effect
+
+=== HUD (Heads-Up Display) ===
+
+Fixed top bar with semi-transparent dark background:
+
+Left section:
+- Score: "Score: {value}" formatted with commas
+- Multiplier badge: shows ×1/×1.5/×2/×3 with color states (dim/gold/orange/red-pulsing)
+  * Click to toggle multiplier detail panel showing thresholds and current streak time
+- Tank Health: label with horizontal bar, color-coded (green >60%, yellow 30-60%, red <30%)
+
+Center section:
+- Status line: game messages with fade-in/out, queued (3s per message)
+- Mobile: wraps to 2 lines instead of truncating (white-space: normal at ≤480px)
+
+Right section:
+- Fish Count: "{current}/{max}" — clickable to toggle species breakdown panel
+
+HUD minimization: on mobile when controls are collapsed, hud-left and hud-right hide, center expands
+
+=== CONTROLS BAR ===
+
+Fixed bottom bar, collapsible via chevron toggle:
+
+Buttons (left to right):
+- Feed (🍽, cost display) — drops 4-8 food flakes
+- Clean (✨, cost display) — resets cleanliness, +30 health
+- Buy Fish (🐟, cost display) — opens fish shop flyout
+- Pause/Resume (⏸/▶)
+- Restart (🔄) — opens styled restart confirmation modal
+- Zen Mode toggle (custom checkbox slider labeled "Auto")
+- Volume button (🔊) — opens volume flyout with horizontal slider (0-100)
+
+Chevron toggle (» icon, rotates):
+- Collapses/expands controls bar
+- On mobile: also minimizes HUD
+
+=== FISH SHOP ===
+
+Flyout panel above controls (not a full-screen modal):
+- Max-width 420px, scrollable, gradient background
+- Shows 4 fish types for current theme
+- Each item: SVG preview, name, personality text, cost in gold
+- Disabled state when can't afford
+- Closes on backdrop click or purchase
+
+=== MODALS ===
+
+Restart Confirmation Modal:
+- "Restart?" title, warning text, "Restart" (red) and "Cancel" buttons
+- Styled to match game aesthetic
+
+Milestone Modal:
+- Large emoji icon, gold title, message text
+- "Keep Playing" and "End on a High Note" buttons
+- Gold border glow, pauses game while shown
+
+=== FISH SYSTEM ===
+
+Fish Class with complete AI and rendering:
+
+Properties per fish:
+- Identity: id, type, typeName
+- Appearance: bodyColor, finColor, accentColor, shape (standard/round/slim/tall), inkStyle, glowColor
+- Size: baseSize (from type), actual size (±15% variation), scaled by Fish.tankScale()
+- Position: x, y within tank bounds
+- Movement: baseSpeed, speed, vx, vy, facingRight, targetX, targetY
+- State: hunger (starts 50, max 100, decays 1.5/s), health (starts 100), alive
+- Animation: tailPhase, bodyWave, finPhase, bubbleTimer
+- Behavior: aggression, traits array with individual intensities
+
+Fish.tankScale(tankW): returns max(0.65, tankW/1100) — scales fish smaller on narrow screens
+calcMaxFish(w, h): max(15, min(20, round(20 × w×h / (1200×800)))) — dynamic max fish count
+
+SVG Construction (build order critical for ink theme):
+1. Shadow ellipse
+2. Glow outline (optional, for dark themes with glowColor)
+3. Tail fin (bezier V-shape with animation anchor)
+4. Body ellipse (sized by shape type)
+5. Body sheen (lighter ellipse) — MUST exist before ink style block
+6. Species-specific markings (see below)
+7. Ink style overrides (if inkStyle: calligraphic strokes, cross-hatching, stippling)
+8. Dorsal fin, Pectoral fin
+9. Eye (white + dark pupil), Mouth
+
+Species-Specific Markings:
+- Neon Tetra: iridescent blue lateral stripe (#00d4ff, nose to mid-body), red rear stripe (#e83030)
+- Clownfish: 3 white bars with black outlines at positions -0.55, 0, 0.5
+- Blue Tang: dark "6"-shaped palette curve, yellow tail accent
+- Angelfish: 4 dark vertical stripes, tall sail-like dorsal, 2 trailing ventral whiskers
+
+=== FISH TRAITS SYSTEM ===
+
+8 personality traits, each fish gets 2-3 from its type definition with individual intensity (0.7-1.3×):
+
+1. Playful: frequent darts (40%× intensity chance), barrel rolls, faster food pursuit
+2. Lazy: 35% slower base speed, prefer lower-mid zone (12% tank height bias), rocking idle animation
+3. Shy: flinch visual (shrink to 85%) when intimidated, hug edges, narrower fear radius
+4. Explorer: 350px base wander range (vs 150), frequent target changes (800-1800ms)
+5. Brave: reduced flee distance (×(1-intensity×0.35)), puff-up animation when confronting
+6. Curious: attract toward mouse position within 200px, slow approach, extended pause
+7. Social: gravitate toward same-type fish, hunger decay -0.6/frame near friend (<100px), happy bubbles
+8. Greedy: food detection 700px (vs 400), eat from 30px (vs 20), pursuit speed ×3
+
+Schooling: 3+ same-type fish coordinate with centroid pulling, velocity averaging, alignment
+
+Fish AI (update each frame):
+1. Growth: babies grow at 0.02/s until 1.0
+2. Hunger: decays at -1.5/s
+3. Health: drops -3/s when hunger <15, recovers +2/s when hunger >60
+4. Death: health ≤ 0 → dead
+5. Mid-water bias: gentle pull toward 40% depth ((midY - y) × 0.15)
+6. Random darting: 15% chance, speed burst 2.5-4×
+7. Aggression: chase less-aggressive fish within 150px (1.5× speed), flee from more-aggressive
+8. Separation force: repel nearby fish (distance < sum of sizes × 25 + 15)
+9. Food pursuit: hunger <70, closest food within 400px, 2× speed, eat within 20px (+30 hunger)
+10. Predation: hunger <20, size >0.9, hunt smaller fish (<70%) within 300px at 2.5×, kill within 15px (+50 hunger)
+11. Wandering: new target every 1.5-4s, ±150px range
+12. Movement: lerp velocity (smoothing 0.1), soft boundary repulsion, clamp to tank
+13. Direction: facingRight from vx (never swim backwards)
+14. Mouth bubbles: every 8-25s, emit rising bubbles for 0.8-1.5s
+
+Fish Death Animation: 1.5s — flip over (180° rotation), wobble sideways (±8px sine), float up (80px), fade out
+
+=== FOOD SYSTEM ===
+
+- dropFood(count): creates food flakes near center
+- Each flake: irregular polygon SVG (5-8 segments), golden colors
+- Ink theme: no fill, stroke only in sepia
+- Sinks at 15-30px/s with horizontal wobble, continuous rotation
+- Settles on bottom (tankH - 70), decays after 15 seconds
+
+=== CREATURE SYSTEM ===
+
+Three creature types that swim across the tank as visitors:
+
+Spawn: first after 30-60s, then every 45-90s, max 1 at a time
+Warning message on spawn: "⚠️ {icon} {name} spotted! Tap to chase it away!"
+
+JELLYFISH:
+- Large (2.0-2.6 scale), bell dome with 8 scalloped rim bumps, 4 radial interior lines
+- 4 oral arms (wavy paths), 8 trailing tentacles, soft glow
+- Passive movement: slow bobbing, horizontal drift
+- PASSIVE hunter: kills fish on contact but does not actively chase
+
+OCTOPUS:
+- Size 2.0-2.2, bulbous mantle, expressive eyes with pupils that track prey
+- 8 curling arms with sucker dots, forehead spots
+- ACTIVE hunter: detects fish within 200px, lunges at 1.8× speed
+- Lunge animation: scale 1.0 → 1.3 → 1.0 on kill
+
+SQUID:
+- Size 1.8-2.8, torpedo-shaped mantle, swept-back fins
+- 8 short arms + 2 long feeding tentacles with club tips
+- ACTIVE hunter: same hunting behavior as octopus
+
+Theme-specific creatures (with colors, glow, sizes):
+- Koi: Moon Jelly (pink), Firefly Squid (gold), Paper Octopus (copper)
+- Tropical: Blue Blubber (blue jelly), Blue-Ring Octopus (gold/blue ring)
+- Deep Ocean: Crystal Jelly (purple, big glow), Giant Squid (brown, large), Dumbo Octopus (pink)
+- Zen: Ghost Jelly (gray), Glass Squid (muted), Stone Octopus (earth tone)
+- Ink: Ink Jelly (stroke only), Sketch Octopus (stroke only)
+
+Creature Eating Mechanics:
+- Kill radius: 40-45px (jellyfish slightly larger)
+- 8-second eat cooldown between kills
+- Only hunt/eat when fully on-screen (50px from edges)
+- Each kill: scoreEvent(-15, "{icon} {name} caught your {fishName}! -15")
+
+Creature Tap Interaction (tap count resets after 5 seconds):
+- Tap 1-2: creature flees in random direction (3-4.5× speed, 2-3 seconds)
+- Tap 3 (provocation):
+  * Jellyfish: drops 5-8 stinger projectiles, bolts at 5× speed
+    - Stingers drift down, 12-15s lifespan, kill fish on contact
+    - Score: -25 provoked penalty; +50 if all fish survive
+  * Octopus/Squid: squirts ink cloud (3+ expanding blobs), bolts at 5×
+    - Ink expands then fades over 10s, kills fish on contact, tank health -15-20
+    - Score: -20 provoked penalty; +40 if all fish survive
+
+Creature Departure Bonus: +30 if creature leaves without eating any fish ("Creature Whisperer")
+Creature Sighting Bonus: +15 each time a creature spawns
+
+=== SCORING SYSTEM ===
+
+Starting score: 100
+
+Base Earnings:
+- Healthy fish (health >50%, not baby) × 0.5 points/second × multiplier
+
+Health Streak Multiplier:
+- All fish health >80% starts streak timer
+- 30s = ×1.5, 90s = ×2, 180s = ×3 (max)
+- Any fish drops below 50% → reset to ×1
+- Visual badge: dim → gold → orange → red (pulsing at ×3)
+
+Score Events (via scoreEvent(amount, message)):
+
+Costs (purchases, not penalties):
+- Feed: -5, Clean: -10, Buy Fish: -15 to -30 (varies by type)
+
+One-Time Achievement Bonuses: see Achievements section
+
+Repeatable Bonuses:
+- Perfect Tank: +25 (all fish health >90%, 5+ fish, every 60s)
+- Biodiversity: +15 (all 4 species alive, every 45s)
+- Baby Born: +10 (each birth)
+- Clean Sweep: +20 (clean when health already >70%)
+
+Creature Interaction Bonuses:
+- Creature Sighting: +15 (each spawn)
+- Creature Whisperer: +30 (creature leaves eating 0 fish)
+- Stinger Survivor: +50 (all fish survive stingers)
+- Ink Cloud Survivor: +40 (all fish survive ink)
+
+Penalties:
+- Fish Death: -15
+- Fish Eaten (by creature): -15
+- Starvation (hunger <10): -20
+- Overstressed (tap stress >10): -5, also tank health -2
+- Provoked Stingers: -25
+- Provoked Ink: -20
+- Neglected Tank (health <25%): -10 every 30s
+
+Score floor: 0 (never negative)
+
+=== ACHIEVEMENTS SYSTEM ===
+
+20 achievements, each with a one-time score bonus:
+
+| ID                | Icon | Name              | Description                                          | Bonus |
+|-------------------|------|-------------------|------------------------------------------------------|-------|
+| first-fish        | 🐟   | First Fish        | Buy your first fish                                  | +25   |
+| full-spectrum     | 🌈   | Full Spectrum     | Own all 4 species of a theme at once                 | +100  |
+| schooling         | 🎓   | School's In       | Have 3+ of the same species schooling                | +50   |
+| baby-boom         | 🍼   | Baby Boom         | 3 babies born in one session                         | +75   |
+| survivor          | 💀   | Survivor          | Recover tank health from <20% to >80%                | +150  |
+| creature-encounter| 🦑   | Creature Encounter| See first Easter egg creature                        | +50   |
+| glass-tapper      | 👆   | Glass Tapper      | Tap glass 10 times in one session                    | +25   |
+| stinger-dodge     | 🪼   | Stinger Dodge     | Survive stinger attack with no fish deaths            | +75   |
+| ink-survivor      | 🛡️   | Ink Survivor      | Fish survive an ink cloud                            | +75   |
+| thousandaire      | 💰   | Thousandaire      | Reach score of 1,000                                 | +50   |
+| ten-thousandaire   | 💎   | Ten Thousandaire  | Reach score of 10,000                                | +100  |
+| zen-master        | 🏆   | Zen Master        | Play all 5 themes                                    | +500  |
+| pacifist          | ☮️   | Pacifist          | Session (2+ min) with zero fish deaths               | +200  |
+| speed-run         | ⚡   | Speed Run         | 1,000 points in under 3 minutes                      | +100  |
+| fish-whisperer    | 🐠   | Fish Whisperer    | 15+ fish alive at once                               | +100  |
+| night-owl         | 🌙   | Night Owl         | Play 10+ minutes in a session                        | +50   |
+| streak-master     | 🔥   | Streak Master     | Reach ×3 multiplier                                  | +250  |
+| creature-collector| 🧬   | Creature Collector| See all 3 creature types in one session              | +200  |
+| danger-zone       | ⚠️   | Danger Zone       | Survive 3 creature attacks in one session            | +150  |
+| high-roller       | 🎰   | High Roller       | Reach 5,000 points in single session                 | +150  |
+
+Toast notification on unlock: pop-up with icon and name, fades after 3.5s
+Achievements overlay: grid display (2 columns desktop, 1 on mobile), locked/unlocked states with dates
+Persisted via ZenStorage (achievements array + achievementDates object)
+
+Session tracking for achievements: fishBorn, fishLost, tapCount, peakFishCount, creatureTypesSeen (Set), attacksSurvived, sessionStartTime
+
+=== VICTORY MILESTONES ===
+
+5 milestone tiers, each triggers a modal once per session:
+
+| ID       | Score  | Icon | Title              | Message                                |
+|----------|--------|------|--------------------|----------------------------------------|
+| bronze   | 1,000  | 🥉   | Bronze Aquarist    | You've reached 1,000 points!           |
+| silver   | 2,500  | 🥈   | Silver Aquarist    | You've reached 2,500 points!           |
+| gold     | 5,000  | 🥇   | Gold Aquarist      | You've reached 5,000 points!           |
+| platinum | 10,000 | 💎   | Platinum Aquarist  | You've reached 10,000 points!          |
+| master   | special| 🏆   | Master Aquarist    | Your tank is thriving! A true master.  |
+
+Master Aquarist: 15+ fish AND all 4 species alive for 180 continuous seconds (thrivingTimer resets when conditions not met)
+
+Milestone detection: checked in game loop after achievements, with 1-second delay (pendingMilestone) to avoid colliding with achievement toasts
+
+Modal: shows icon, title, message. Two buttons:
+- "Keep Playing" — resume game, milestone won't trigger again
+- "End on a High Note" — ends session with victory, shows Game Summary with gold victory cause
+
+Best milestone persisted in ZenStorage, shown on splash stats ribbon and Game Summary
+
+=== GAME OVER CONDITIONS ===
+
+1. All Fish Lost:
+   - 5-second grace period with warning ("Your tank is empty! Buy fish!")
+   - If no fish purchased during grace → game ends
+   - Defeat message: "💀 Your last fish has perished..."
+
+2. Tank Health Zero:
+   - Immediate game over
+   - Defeat message: "🌊 The tank has become uninhabitable..."
+
+endGame(defeatCause):
+- Shows defeat message for 3 seconds
+- Then shows Game Summary with defeat cause in red text
+- Resets all game state, returns to splash
+
+=== GAME SUMMARY SCREEN ===
+
+Overlay displaying session results:
+- Score (formatted), Best Score (all-time high), Duration (MM:SS)
+- Fish Born, Fish Lost, Peak Fish Count
+- High Score Badge: "🏆 New High Score! 🏆" if applicable
+- Defeat cause (red text) or Victory cause (gold text) if applicable
+- Best Milestone badge (icon + title)
+- Achievements earned this session (badge display)
+- "Continue" button → returns to splash
+
+showSessionSummary(score, onContinue, defeatCause, victoryCause): accepts 4 parameters
+
+=== PERSISTENT STORAGE (ZenStorage) ===
+
+Uses localStorage with key 'zenquariumData'. Defaults:
+- highScore: 0
+- totalSessions: 0
+- achievements: [] (array of unlocked IDs)
+- achievementDates: {} (ID → 'YYYY-MM-DD')
+- lastTheme: null
+- themesPlayed: [] (array of theme IDs for Zen Master achievement)
+- bestMilestone: null
+- stats: { totalFishBorn, totalFishLost, longestSession, creaturesEncountered, totalFoodDropped, totalCleans, highestFishCount }
+
+=== TAP THE GLASS ===
+
+When player clicks the tank:
+1. Check creatures first: if creature within range, handle creature tap (see Creature System)
+2. Check fish within scatter radius (150px base + fish.size × 30):
+   - Curious fish: 50% chance swim TOWARD tap (approach 60-120px, speed ×2-3)
+   - Brave fish: flee less (distance ×(1-bravery×0.35))
+   - Normal: flee at calculated angle, distance 250-500px × crowd factor, speed 6-10× base
+   - Crowd intensity: min(nearbyFish.length / 3, 2) — scales SFX and movement
+   - Play glass tap sound with intensity
+   - Visual ripple: expanding border circle (80px + 15px per fish), second ring at 1.4× if 3+ fish
+   - Stress: tapStressAccum += 3, decays at 0.5/s. If >10: tank health -2, score -5
+3. If no fish found: drop food at click position (if affordable)
+
+=== AUTO MODE (ZEN MODE) ===
+
+Toggle via checkbox in controls:
+- Auto-feed: every 3s, if any fish hunger <50 and affordable → drop 3-6 food
+- Auto-clean: every 5s, if tank health <60 and affordable → clean
+- Auto-buy: every 8s, if alive fish <5 and total <10 → buy random affordable fish
+- Fish cap at 10 for auto mode (vs 20 manual)
+- Status messages: "Auto: Added a {name} 🤖"
+
+=== REPRODUCTION ===
+
+When 2+ healthy adult fish of same type in tank:
+- Cooldown per type: 20-40 seconds after each birth
+- Conditions: avg hunger >65, avg health >70, tank health >50
+- 2% chance per frame when conditions met
+- Baby spawns near parent at 30% size, grows to adult over time
+- Max fish check: respects auto mode cap
+- Birth chime sound + celebration message + scoreEvent(+10)
+
+=== GAME LOOP ===
+
+requestAnimationFrame-based loop:
+1. Calculate dt (capped at 0.1s)
+2. Update Tank environment (bubbles)
+3. Update Food (sinking, wobble, decay)
+4. Update Creatures (spawning, movement, hunting, eating → returns eatenByCreature array)
+5. Process creature-eaten fish: scoreEvent(-15), death animation, status message
+6. Update each Fish (AI, movement, eating, predation)
+7. Collect dead fish → animate death → remove. Starvation (hunger <10): scoreEvent(-20), else: scoreEvent(-15)
+8. Check reproduction
+9. Run auto mode (if enabled)
+10. Decay tap stress (-0.5/s)
+11. Score: healthy fish × 0.5/s × multiplier
+12. Repeatable bonus checks: Perfect Tank (60s), Biodiversity (45s), Neglect penalty (30s)
+13. Tank health: 100 - cleanlinessDecay - overcrowding penalty (if >12 fish)
+14. If health <30: all fish lose health at 2/s
+15. Update cloudiness overlay
+16. Check achievements (via Achievements.checkAll)
+17. Check milestones (score thresholds + thriving tank)
+18. Process pending milestone (1s delay)
+19. Health streak multiplier logic
+20. Game-over checks: fish count zero (grace period) or tank health zero
+21. Update all UI elements
+
+=== GAME STATE ===
+
+Initial state:
+- score: 100, tankHealth: 100, cleanlinessDecay: 0 (increases at 0.3/s)
+- maxFish: calculated by calcMaxFish(), feedCost: 5, cleanCost: 10
+- scoreRate: 0.5 per healthy fish per second
+- multiplier: 1, streakActive: false
+- Starts with 2 fish (first two types from selected theme)
+- milestonesShown: Set(), thrivingTimer: 0, pendingMilestone: null
+- gameOverTimer: 0, gameOverWarning: false, gameOverTriggered: false
+- perfectTankTimer/biodiversityTimer/neglectTimer: 0, tapStressAccum: 0
+
+=== AUDIO SYSTEM (Web Audio API) ===
+
+ZenAudio Module — entirely synthesized, no audio files:
+
+Architecture: AudioContext → masterGain → ambientGain (0.8) + sfxGain (0.6). Default volume: 0.5
+
+Water Ambient (all themes): 4s white noise buffer, LPF 200Hz + HPF 40Hz, LFO on LPF at 0.1Hz, gain 0.4
+
+Tonal Pad (per theme): 3 layered oscillators with vibrato
+- Koi: miyako-bushi pentatonic from C2 (65Hz)
+- Tropical: Major+6th from E2 (82Hz)
+- Deep Ocean: Minor+b5 from A1 (55Hz)
+- Zen: open fifths/fourths from D2 (73Hz)
+- Ink: whole-tone scale from D#2 (78Hz)
+
+Periodic Melody (every 5-8s, 70% chance): 3-5 note sequences from theme-specific arrays
+- Koi: pentatonic koto [262,294,330,392,440], 1.5s decay
+- Tropical: steel drum [330,392,494,523,659], 0.8s decay
+- Deep Ocean: sub-oceanic [65,82,98,110,131], 3.5s decay, LPF 900Hz
+- Zen: singing bowl [392,523,659,784], 3.0s decay
+- Ink: impressionist piano [330,370,415,466,523], 1.8s decay
+
+Texture Sounds (every 3s, 40% chance):
+- Koi: wind chime, Tropical: bird chirp, Deep: whale sweep + sub-bass + metallic ping
+- Zen: singing bowl harmonics, Ink: piano hammer tone
+
+Sound Effects:
+- playPlop(): food drop (sine 400→80Hz, 0.1s)
+- playBubble(): fish bubble (sine 600-1000→1200-1800Hz, 0.08s)
+- playBirth(): ascending chime C5-E5-G5-C6
+- playEaten(): predation thud (sine 150→40Hz)
+- playCleaning(): sparkle (5 random 2000-5000Hz tones)
+- playDrip(): water drip (sine 1200→300Hz)
+- playTapGlass(intensity): low thud + 3 glass ring frequencies + noise burst
+- playStingersReleased(): eerie descending 4 notes (800-1400Hz)
+- playInkSquirted(): dark whoosh (octopus) or glowing effect (squid)
+
+=== THEMES ===
+
+5 themes defining: id, name, description, cssClass, cardBg, fishTypes (4), plantColors (8), bubbleColor, particleColor, creature definitions
+
+CSS custom properties: --water-top/bottom/mid, --accent, --accent-glow, --text-primary/secondary, --hud-bg/border, --btn-bg/hover, --sand/sand-light, --plant-primary/secondary, --surface-color, --caustic-color
+
+THEME 1: Koi Garden (theme-koi)
+- Warm blue waters (#1a3a5c → #0a1628), orange accent (#e8845c)
+- Fish: Orange Koi (1.2, cost 20, social+lazy), White Koi (1.3, cost 25, shy+explorer), Red Koi (1.1, cost 30, brave+greedy, round), Goldfish (0.8, cost 15, playful+curious, round)
+- Special particles: pink cherry blossom petals
+- Creatures: Moon Jelly, Firefly Squid, Paper Octopus
+
+THEME 2: Tropical Reef (theme-tropical)
+- Vibrant blue (#0a4a6e → #061428), cyan accent (#00d4aa)
+- Fish: Clownfish (0.8, cost 20, playful+brave, round), Blue Tang (1.0, cost 25, explorer+brave, slim), Angelfish (1.2, cost 30, greedy+brave, tall), Neon Tetra (0.6, cost 10, shy+social, slim, fast 1.5 speed)
+- Creatures: Blue Blubber jellyfish, Blue-Ring Octopus
+
+THEME 3: Deep Ocean (theme-deep)
+- Very dark (#060d18 → #020810), cyan accent (#4dc9f6)
+- ALL fish have glowColor (glow outline rendered behind each fish)
+- Fish: Anglerfish (1.4, cost 30, lazy+greedy, round), Jellyfish (0.9, cost 20, shy+explorer, tall), Lanternfish (0.6, cost 15, social+playful, slim), Glowfin (0.8, cost 25, curious+explorer)
+- Special particles: bioluminescent dots
+- Creatures: Crystal Jelly (biggest glow), Giant Squid (2.8 scale), Dumbo Octopus
+
+THEME 4: Zen Garden (theme-zen)
+- Dark minimalist (#1a1a1a → #0a0a08), burnt orange accent (#d4742c)
+- ALL fish have subtle glowColor for visibility on dark background
+- Fish: Golden Carp (1.0, cost 25, lazy+social), Silver Minnow (0.6, cost 15, playful+explorer, slim), Ink Koi (1.2, cost 30, brave+greedy, round), Pearl Koi (1.1, cost 20, curious+shy)
+- Creatures: Ghost Jelly, Glass Squid, Stone Octopus
+
+THEME 5: Pen & Ink (theme-ink)
+- LIGHT theme — cream/beige (#f5f0e8), dark text (#2a2a2a)
+- ALL fish have bodyColor/finColor 'none' — rendered as ink line drawings
+- Each fish has unique accentColor and subtle inkWash fill
+- Fish: Ink Koi (1.1, cost 20, sepia #5c3a1a), Sketch Angel (1.0, cost 25, navy #2a3a6a, tall), Line Tetra (0.6, cost 15, forest #2a5a3a, slim), Doodle Puffer (0.9, cost 30, rust #8a3a2a, round)
+- inkTheme: true — affects plant rendering, food rendering
+- Extensive CSS overrides for light-on-dark reversal
+- Creatures: Ink Jelly (stroke only), Sketch Octopus (stroke only)
+
+=== ABOUT OVERLAY ===
+
+Title: "Zenquarium"
+
+Content sections (h3 headings):
+- Intro: "A meditative aquarium that's also a game. Tend a living digital fishtank — or sit back and let it tend itself."
+- How to Play: Pick a theme, build aquarium, feed fish, keep tank clean, buy species. Healthy fish earn points; neglect causes starvation and predation.
+- Score & Multiplier: Everything affects score. Health streak multiplier up to ×3. Bonuses for cleaning, diversity, baby fish.
+- Creatures & Risk: Mystery creatures visit and are hungry. Jellyfish drift and sting. Octopus/squid actively hunt. Tap to chase away but don't tap 3 times or retaliation.
+- Achievements: 20 achievements across exploration, caretaking, and daring play.
+- Zen Mode: Toggle for self-managing aquarium.
+- Themes: Five handcrafted environments with unique fish, plants, and soundscapes.
+
+Byline: "Created by Coffee Czar ☕"
+
+=== RESTART FLOW ===
+
+1. Click restart → show styled confirmation modal
+2. If confirmed (doRestart):
+   - Cancel animation frame
+   - Remove all fish SVG, clear arrays (fish, food, creatures, stingers, ink)
+   - Reset all state values (score, health, timers, milestones, game-over flags)
+   - Reset auto mode toggle, controls visibility, cloudiness overlay
+   - Stop ambient audio, reset body className to ''
+   - Show splash screen, restart splash ambient if not muted
+
+=== RESPONSIVE DESIGN ===
+
+Breakpoints: 768px, 480px, 360px
+- Theme cards: 5 cols → 2 cols → 1 col
+- Fish scaling: Fish.tankScale() reduces fish to 65% on narrow screens
+- Dynamic max fish: adjusts by tank area, floor at 15
+- Status line: wraps instead of truncating on mobile
+- Controls: icon-only below certain widths
+- Touch: min 44px tap targets, active states, safe-area-inset support
+- HUD minimization on mobile when controls collapsed
+
+=== CRITICAL IMPLEMENTATION NOTES ===
+
+1. VARIABLE ORDER: In Fish createSVG, the `sheen` SVG element MUST be created BEFORE the ink style block.
+2. THEME CLEANUP: On restart, document.body.className = '' before showing splash.
+3. CONTROLS BINDING: Use controlsBound flag to prevent re-binding event listeners.
+4. SPLASH AUDIO: Separate node arrays from game ambient. Stop on game enter, restart on splash return.
+5. AUDIO CONTEXT: Requires user gesture. Use one-time click/keydown listener.
+6. GLOW OUTLINES: For themes with glowColor, render softer ellipse behind fish.
+7. CAUSTIC OPACITY: Initial CSS 0.06, animation cycles 0.04-0.12.
+8. FOOD IN INK THEME: No fill, stroke only in sepia.
+9. DEATH ANIMATION: Use requestAnimationFrame, not CSS transitions. Complete in 1.5s before DOM removal.
+10. SEPARATION FORCE: Calculate after aggression, before food pursuit.
+11. MILESTONE DELAY: 1-second delay between achievement toast and milestone modal.
+12. SPLASH TETRAS: Must resize canvases after splash becomes visible (not while hidden).
+13. GAME-OVER GRACE: 5s timer for empty tank; reset timer if fish purchased during grace.
+14. CREATURE ON-SCREEN GATE: fullyOnScreen check (50px from edges) before hunting/eating.
+15. TAP RESET: 5-second window between creature taps; allows defending without triggering 3rd-tap retaliation.
+
+=== FILE STRUCTURE ===
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0a1628">
+    <meta name="description" content="Zenquarium - A meditative aquarium experience">
+    <title>Zenquarium</title>
+    <style>
+        /* ~1,900 lines of CSS */
+    </style>
+</head>
+<body>
+    <!-- Splash Screen (with plants + tetras divs at splash-screen level, content div inside) -->
+    <!-- About Overlay -->
+    <!-- Achievements Overlay -->
+    <!-- Session Summary Overlay (Game Summary with defeat/victory cause) -->
+    <!-- Game Screen with Tank layers, HUD, Controls, Fish Shop Flyout, Volume Flyout -->
+    <!-- Milestone Modal -->
+    <!-- Restart Modal -->
+    <script>
+        /* ~5,500 lines of JavaScript */
+    </script>
+</body>
+</html>
