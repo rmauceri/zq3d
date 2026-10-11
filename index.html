@@ -126,7 +126,7 @@
         </nav>
     </header>
 
-    <div id="viewport" class="world">
+    <div id="viewport" class="world" tabindex="0" role="region" aria-label="Aquarium. Drag to orbit, or use arrow keys.">
         <div id="preview-badge" class="scene-badge"><span class="live-dot"></span> A LIVING WORLD <span id="renderer-label">REAL-TIME 3D</span></div>
         <div id="scene-caption" class="scene-caption">
             <span class="eyebrow" id="scene-location">CORAL SHALLOWS</span>
@@ -160,36 +160,20 @@
 
     <section id="game-ui" aria-label="Aquarium controls" hidden>
         <div class="game-hud">
-            <button class="hud-score" id="score-button" aria-label="Score and health multiplier details">
-                <span class="eyebrow">YOUR LITTLE LEGACY</span>
-                <span class="score-line"><strong id="score">100</strong><span class="score-unit">pts</span><span id="multiplier" class="multiplier">&times;1</span></span>
-            </button>
-            <div class="hud-water">
-                <div><span>Water health</span><strong id="water-value">100%</strong></div>
-                <div class="meter" id="water-meter" role="progressbar" aria-label="Water health" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><span id="water-bar"></span></div>
-            </div>
-            <button class="hud-fish" id="residents-button" aria-label="Residents: inspect or follow your fish">
-                <svg class="icon" aria-hidden="true"><use href="#i-fish"/></svg>
-                <span><strong id="fish-count">2 / 20</strong><small>RESIDENTS</small></span>
+            <button class="hud-score" id="score-button" aria-label="Aquarium status and progress">
+                <span class="score-line"><strong id="score">100</strong><span class="score-unit">pts</span><span class="status-condition" id="status-condition">Water clear</span></span>
+                <span class="status-detail" id="status-detail">2 residents</span>
             </button>
         </div>
-        <div id="milestone-track" class="milestone-track">
-            <span id="current-theme-name">Tropical Reef</span>
-            <span class="track-divider"></span>
-            <span id="next-goal">A first step toward Bronze</span>
-            <progress id="goal-progress" value="100" max="1000" aria-label="Next milestone"></progress>
-        </div>
-        <div class="camera-controls" role="group" aria-label="Camera controls">
-            <button class="icon-button" id="orbit-button" title="Orbit right" aria-label="Orbit camera right"><svg class="icon" aria-hidden="true"><use href="#i-orbit"/></svg></button>
-            <button class="icon-button" id="view-button" title="Change camera angle" aria-label="Change camera angle"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg></button>
-            <button class="icon-button" id="zoom-in-button" title="Move closer (+)" aria-label="Zoom in"><svg class="icon" aria-hidden="true"><use href="#i-zoom-in"/></svg></button>
-            <button class="icon-button" id="zoom-out-button" title="Move back (-)" aria-label="Zoom out"><svg class="icon" aria-hidden="true"><use href="#i-zoom-out"/></svg></button>
-            <button class="icon-button" id="reset-camera-button" title="Reset camera (R)" aria-label="Reset camera"><svg class="icon" aria-hidden="true"><use href="#i-reset"/></svg></button>
-            <button class="icon-button" id="camera-immerse-button" title="Immersive view" aria-label="Enter immersive view"><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg></button>
-        </div>
-        <button id="follow-label" class="follow-label" hidden>Following a fish &middot; Stop following</button>
         <div class="care-alert" id="care-alert" hidden>
-            <span id="care-message"></span><div class="care-actions"><button id="care-action" class="small-button">Feed fish</button><button id="care-action-secondary" class="small-button" hidden>Right decoy</button></div>
+            <span id="care-message"></span><div class="care-actions"><button id="care-action" class="small-button">Feed fish</button></div>
+        </div>
+        <div class="encounter-hint" id="encounter-hint" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+        <div id="placement-marker" class="placement-marker" aria-hidden="true" hidden></div>
+        <div id="placement-controls" class="placement-controls" hidden>
+            <span id="placement-hint" role="status" aria-live="polite"></span>
+            <button id="placement-confirm" class="small-button">Drop food</button>
+            <button id="placement-cancel" class="small-button">Cancel</button>
         </div>
         <div class="pause-card" id="pause-card" hidden>
             <span class="eyebrow">A MOMENT TO YOURSELF</span>
@@ -199,27 +183,29 @@
             <button class="quiet-button" id="pause-home-button">Save &amp; return home</button>
         </div>
         <div class="dock" role="group" aria-label="Tend your aquarium">
-            <button id="feed-button" title="Feed (F)" aria-label="Feed fish for 5 points"><svg class="icon" aria-hidden="true"><use href="#i-feed"/></svg><span>Feed <small>&minus;5 pts</small></span></button>
+            <button id="feed-button" title="Click Feed, then the water; double-tap for a normal drop (F)" aria-label="Feed: click then choose water, or double-tap for a normal drop. Costs 5 points." aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-feed"/></svg><span>Feed <small id="feed-detail">&minus;5 pts</small></span></button>
             <button id="clean-button" title="Clean (C)" aria-label="Clean water for 10 points"><svg class="icon" aria-hidden="true"><use href="#i-clean"/></svg><span>Clean <small>&minus;10 pts</small></span></button>
             <button id="shop-button" title="Add fish (B)" aria-label="Open the fish shop"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><span>Add fish <small>4 species</small></span></button>
-            <span class="dock-divider"></span>
-            <button id="auto-button" aria-pressed="false" aria-label="Enable Zen care"><svg class="icon" aria-hidden="true"><use href="#i-leaf"/></svg><span>Zen care <small id="auto-label">Off</small></span></button>
-            <button id="prizes-button" title="Tank prizes (T)" aria-label="Open tank prize collection"><svg class="icon" aria-hidden="true"><use href="#i-chest"/></svg><span>Prizes <small id="prize-count">0 / 4</small></span></button>
-            <button id="pause-button" title="Pause (Space)" aria-label="Pause aquarium"><svg class="icon" aria-hidden="true"><use href="#i-pause"/></svg><span id="pause-label">Pause</span></button>
-            <button id="immerse-button" title="Hide interface (I)" aria-label="Enter immersive view"><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg><span>Immerse</span></button>
+            <button id="menu-button" title="Aquarium menu (M)" aria-label="Aquarium menu" aria-expanded="false" aria-controls="tray"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Menu</span></button>
         </div>
-        <button class="dock-toggle icon-button" id="dock-toggle" aria-expanded="true" aria-label="Hide aquarium controls" title="Hide controls"><svg class="icon" aria-hidden="true"><use href="#i-chevron"/></svg></button>
-        <p class="game-footnote">Tap the glass &middot; Drag to explore &middot; Residents for fish details</p>
     </section>
     <button class="exit-immersion" id="exit-immersion" hidden><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg> Exit immersive view</button>
     <div id="save-warning" class="save-warning" role="alert" hidden></div>
     <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+    <aside id="milestone-notice" class="milestone-notice" aria-labelledby="milestone-title" hidden>
+        <strong id="milestone-title" role="status" aria-live="polite"></strong>
+        <div><button class="small-button" id="milestone-end">Stop</button><button class="small-button" id="milestone-continue">Continue</button></div>
+    </aside>
     <button id="update-button" class="update-button" hidden>Update ready &middot; Save &amp; reload</button>
 
     <aside id="tray" class="tray" role="region" aria-labelledby="tray-title" hidden>
         <div class="tray-heading"><div><span class="eyebrow" id="tray-eyebrow">YOUR AQUARIUM</span><h2 id="tray-title">A little more life.</h2></div><button class="icon-button" id="tray-close" aria-label="Close tray"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
         <div id="tray-content" class="panel-content"></div>
     </aside>
+    <dialog id="catalog" class="panel catalog" aria-labelledby="catalog-title">
+        <div class="panel-heading"><div><span class="eyebrow">THE FISH CATALOG</span><h2 id="catalog-title">A little more life.</h2></div><button class="icon-button" id="catalog-close" aria-label="Close fish catalog"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
+        <div id="catalog-content" class="panel-content"></div>
+    </dialog>
     <dialog id="panel" class="panel" aria-labelledby="panel-title">
         <div class="panel-heading"><div><span class="eyebrow" id="panel-eyebrow">YOUR AQUARIUM</span><h2 id="panel-title">Field guide</h2></div><button class="icon-button" id="panel-close" aria-label="Close panel"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button></div>
         <div id="panel-content" class="panel-content"></div>

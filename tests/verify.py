@@ -104,28 +104,37 @@ def main():
             page.locator("#begin-button").click()
             page.wait_for_function("ZQApp.game && ZQApp.game.state.fish.length === 2")
 
+            def menu_action(action, target=page):
+                selector = f'[data-menu-action="{action}"]'
+                if target.locator(selector).count() == 0:
+                    target.locator("#menu-button").click()
+                target.locator(selector).click()
+
             def shop():
                 page.locator("#shop-button").click()
                 before = page.evaluate("ZQApp.game.state.elapsed")
                 page.wait_for_function("(before) => ZQApp.game.state.elapsed > before", arg=before)
                 require(page.evaluate("!document.getElementById('panel').open"), "The shop opened a modal")
+                require(page.locator("#catalog .fish-preview").count() == 4, "The catalog lacks species previews")
                 for index in [0, 2, 3]:
                     page.locator(f'[data-buy="{index}"]').click()
-                    require(page.locator("#tray").is_visible(), "The live shop closed after a purchase")
+                    require(page.locator("#catalog").is_visible(), "The live catalog closed after a purchase")
                 require(page.evaluate("ZQApp.game.state.fish.length") == 5, "Fish purchases did not reach five residents")
                 require(page.evaluate("!!ZQApp.profile.achievements['full-spectrum']"), "Full Spectrum was not awarded")
+                page.locator("#catalog-close").click()
                 page.locator("#feed-button").click()
-                require(page.locator("#tray").is_visible(), "Care controls could not be used alongside the shop")
-                page.locator("#tray-close").click()
+                page.keyboard.press("Enter")
 
             check("Non-modal shop stays live, supports care controls, and awards biodiversity", shop)
-            page.locator("#auto-button").click()
+            menu_action("auto")
+            page.locator("#tray-close").click()
             page.locator("#feed-button").click()
+            page.keyboard.press("Enter")
             page.locator("#clean-button").click()
             screenshot(page, "desktop-aquarium")
 
             def manual_pause():
-                page.locator("#pause-button").click()
+                menu_action("pause")
                 before = page.evaluate("JSON.stringify(ZQApp.game.state)")
                 page.wait_for_timeout(250)
                 require(page.evaluate("JSON.stringify(ZQApp.game.state)") == before, "Paused simulation changed")
@@ -136,19 +145,20 @@ def main():
 
             def controls():
                 original_yaw = page.evaluate("ZQApp.renderer.camera.yaw")
-                page.locator("#orbit-button").click()
+                menu_action("orbit")
                 require(page.evaluate("ZQApp.renderer.camera.yaw") != original_yaw, "Camera orbit was ignored")
-                page.locator("#zoom-in-button").click()
+                menu_action("zoom-in")
                 require(page.evaluate("ZQApp.renderer.camera.zoom") < 1, "Zoom failed")
-                page.locator("#reset-camera-button").click()
-                page.locator("#residents-button").click()
+                menu_action("reset")
+                menu_action("residents")
                 page.locator("[data-follow]").first.click()
                 require(page.evaluate("ZQApp.renderer.camera.follow !== null"), "Fish following did not start")
-                page.locator("#follow-label").click()
-                page.locator("#immerse-button").click()
+                menu_action("unfollow")
+                menu_action("immerse")
                 require(page.locator("#exit-immersion").is_visible(), "No accessible exit from immersion")
                 page.locator("#exit-immersion").click()
                 page.keyboard.press("f")
+                page.keyboard.press("Enter")
                 page.keyboard.press("r")
                 require(page.evaluate("ZQApp.game.state.food.length > 0"), "Keyboard feed failed")
 
@@ -170,13 +180,12 @@ def main():
                 require(page.locator("#tray").is_hidden() and not page.evaluate("document.getElementById('panel').open"), "A glass tap opened an inspector or dialog")
                 page.locator("#shop-button").click()
                 taps = page.evaluate("ZQApp.game.state.stats.taps")
-                page.mouse.click(720, 380)
-                require(page.evaluate("ZQApp.game.state.stats.taps") == taps + 1, "An open tray blocked interaction with the aquarium")
-                require(page.locator("#tray").is_visible() and "life" in page.locator("#tray-title").inner_text(), "Glass tapping replaced the existing tray")
+                page.mouse.click(20, 300)
+                require(page.evaluate("ZQApp.game.state.stats.taps") == taps, "Catalog dismissal tapped the glass")
+                require(page.locator("#catalog").is_hidden(), "Catalog did not light-dismiss")
                 page.keyboard.press("g")
-                require(page.evaluate("ZQApp.game.state.stats.taps") == taps + 2, "Keyboard-only glass tapping is unavailable")
-                page.locator("#tray-close").click()
-                page.locator("#residents-button").click()
+                require(page.evaluate("ZQApp.game.state.stats.taps") == taps + 1, "Keyboard-only glass tapping is unavailable")
+                menu_action("residents")
                 require(page.locator("[data-follow]").count() >= 2, "Secondary resident inspection is missing")
                 require(page.locator("#tap-fish-button").count() == 0, "Glass tapping still requires an inspector action")
                 before = page.evaluate("ZQApp.game.state.elapsed")
@@ -190,11 +199,11 @@ def main():
                 before = page.locator("#detail-score").inner_text()
                 page.evaluate("ZQApp.game.state.score += 40")
                 page.wait_for_function("(before) => document.getElementById('detail-score').textContent !== before", arg=before)
-                page.locator("#journal-button").click()
+                menu_action("journal")
                 page.locator('[data-tab="achievements"]').click()
                 page.evaluate("ZQApp.game.unlock('glass-tapper')")
                 page.wait_for_selector('[data-achievement="glass-tapper"].unlocked')
-                page.locator("#residents-button").click()
+                menu_action("residents")
                 fish_id = page.evaluate("ZQApp.game.addFish(3, true).id")
                 row = page.locator(f'[data-resident="{fish_id}"]')
                 row.wait_for()
@@ -207,7 +216,7 @@ def main():
             check("Score, discoveries, and new residents refresh inside live trays", live_details)
 
             def persistence():
-                page.locator("#pause-button").click()
+                menu_action("pause")
                 saved = page.evaluate("({ fish: ZQApp.game.state.fish.map(f => ({id:f.id,type:f.type,hunger:f.hunger})), elapsed: ZQApp.game.state.elapsed, score:ZQApp.game.state.score })")
                 page.reload()
                 page.wait_for_function("typeof ZQApp !== 'undefined'")
@@ -237,13 +246,22 @@ def main():
                     page.set_viewport_size({"width": width, "height": height})
                     page.wait_for_timeout(180)
                     require(page.evaluate("document.documentElement.scrollWidth <= innerWidth"), f"{label} overflows horizontally")
-                    for selector in ["#feed-button", "#clean-button", "#shop-button", "#pause-button", "#settings-button"]:
+                    for selector in ["#feed-button", "#clean-button", "#shop-button", "#menu-button", "#score-button"]:
                         box = page.locator(selector).bounding_box()
                         require(box and box["width"] >= 43.9 and box["height"] >= 43.9, f"{label}: {selector} touch target too small")
                         require(box["x"] >= 0 and box["x"] + box["width"] <= width + 1, f"{label}: {selector} offscreen")
                         require(box["y"] >= 0 and box["y"] + box["height"] <= height + 1, f"{label}: {selector} offscreen")
+                    require(page.evaluate("""() => {
+                        const area = ['.game-hud', '.dock'].reduce((sum, selector) => {
+                            const r = document.querySelector(selector).getBoundingClientRect();
+                            return sum + r.width * r.height;
+                        }, 0);
+                        return area / (innerWidth * innerHeight) <= 0.2
+                            && document.querySelectorAll('.dock > button').length === 4
+                            && getComputedStyle(document.querySelector('.site-header')).display === 'none';
+                    }"""), f"{label}: default interface covers more than 20 percent or retains competing controls")
                     screenshot(page, f"{label}-aquarium")
-                page.locator("#home-button").click()
+                menu_action("home")
                 page.set_viewport_size({"width": 1440, "height": 1000})
                 for theme in ["koi", "deep", "zen", "ink", "tropical"]:
                     page.locator(f'[data-theme="{theme}"]').click()
@@ -299,15 +317,16 @@ def main():
             check("WebGL context loss safely pauses and rebuilds graphics", graphics_recovery)
 
             def audio_and_settings():
-                page.locator("#sound-button").click()
-                require(page.locator("#sound-button").get_attribute("aria-pressed") == "true", "Sound did not enable")
-                page.locator("#settings-button").click()
+                menu_action("sound")
+                require(page.evaluate("ZQApp.settings.sound"), "Sound did not enable")
+                menu_action("settings")
                 page.locator("#setting-quality").select_option("battery")
                 page.locator("#setting-motion").select_option("reduced")
                 page.locator("#tray-close").click()
                 require(page.evaluate("ZQApp.renderer.level === 'battery' && ZQApp.renderer.reduced"), "Motion or quality setting did not apply")
-                page.locator("#sound-button").click()
-                require(page.locator("#sound-button").get_attribute("aria-pressed") == "false", "Sound did not mute")
+                menu_action("sound")
+                require(not page.evaluate("ZQApp.settings.sound"), "Sound did not mute")
+                page.locator("#tray-close").click()
 
             check("Synthesized sound, battery saver, and reduced motion", audio_and_settings)
 
@@ -325,12 +344,12 @@ def main():
                         g.state.creature.entered = true;
                     }""", kind)
                 spawn("crab")
-                page.wait_for_selector('#care-alert[data-challenge="crab"]:visible')
-                page.locator("#shop-button").click()
+                page.wait_for_selector('#encounter-hint:visible')
+                menu_action("prizes")
                 for width, height in [(320, 568), (390, 844), (768, 1024), (844, 390), (1440, 1000)]:
                     page.set_viewport_size({"width": width, "height": height})
                     page.wait_for_timeout(180)
-                    for selector in ["#care-action", "#care-action-secondary", "#tray-close", "#dock-toggle", "#feed-button"]:
+                    for selector in ["#tray-close", "#menu-button", "#feed-button"]:
                         require(page.locator(selector).evaluate("""button => {
                             const r = button.getBoundingClientRect();
                             const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
@@ -342,50 +361,53 @@ def main():
                         screenshot(page, "phone-live-challenge")
                 page.locator("#tray-close").click()
                 screenshot(page, "crab-challenge")
-                for selector in ["#care-action", "#care-action-secondary", "#care-action"]:
-                    page.locator(selector).click()
+                require(page.locator("#encounter-hint button").count() == 0, "Encounter hint contains popup controls")
+                for key in ["j", "l", "j"]:
+                    page.keyboard.press(key)
                     page.wait_for_timeout(420)
-                require(page.evaluate("!!ZQApp.profile.prizes.arch"), "Crab defense did not unlock its arch")
+                require(page.evaluate("!!ZQApp.game.state.prizes.arch"), "Crab defense did not unlock its arch")
                 spawn("eel")
                 page.evaluate("ZQApp.game.state.creature.phaseTimer = 0.01")
-                page.wait_for_selector('#care-alert[data-ready="true"]:visible')
-                page.locator("#care-action").click()
-                require(page.evaluate("!!ZQApp.profile.prizes.lantern"), "Timed flash did not unlock its lantern")
+                page.wait_for_function('ZQApp.game.state.creature?.phase === "windup"')
+                page.keyboard.down("h")
+                page.wait_for_function("ZQApp.game.state.creature.defended")
+                page.keyboard.up("h")
+                require(page.evaluate("!!ZQApp.game.state.prizes.lantern"), "Timed hold did not unlock its lantern")
                 screenshot(page, "eel-challenge")
-                page.evaluate("ZQApp.game.state.score = 1000; ZQApp.profile.stats.born = 1; ZQApp.game.checkPrizes()")
+                page.evaluate("ZQApp.game.state.score = 1000; ZQApp.game.state.stats.born = 1; ZQApp.game.checkPrizes()")
                 page.wait_for_selector("#milestone-continue", timeout=10000)
                 page.keyboard.press("Escape")
-                require(page.evaluate("document.getElementById('panel').open"), "Milestone was dismissed without a choice")
+                require(page.evaluate("!document.getElementById('panel').open && !ZQApp.game.state.paused"), "Milestone blocked the aquarium")
                 page.locator("#milestone-continue").click()
-                page.locator("#prizes-button").click()
-                require(page.evaluate("Object.keys(ZQApp.profile.prizes).length") == 4, "Not all four prize conditions worked")
-                for prize in page.evaluate("ZQApp.profile.equippedPrizes.slice()"):
+                menu_action("prizes")
+                require(page.evaluate("Object.keys(ZQApp.game.state.prizes).length") == 4, "Not all four prize conditions worked")
+                for prize in page.evaluate("ZQApp.game.state.equippedPrizes.slice()"):
                     page.locator(f'[data-equip="{prize}"]').click()
                 for prize in ["chest", "oyster", "lantern"]:
                     page.locator(f'[data-equip="{prize}"]').click()
                 page.locator('[data-prize-play="chest"]').click()
                 require(page.evaluate("ZQApp.game.state.prizeEffects.chest > 0"), "Chest did not react")
-                require(page.evaluate("ZQApp.profile.equippedPrizes.length") == 3, "Prize placement exceeded its limit")
+                require(page.evaluate("ZQApp.game.state.equippedPrizes.length") == 3, "Prize placement exceeded its limit")
                 require(page.locator('[data-equip="arch"]').is_disabled(), "A fourth prize can be placed")
                 page.wait_for_timeout(250)
                 screenshot(page, "live-prize-collection")
                 page.locator("#tray-close").click()
                 page.wait_for_timeout(200)
                 screenshot(page, "earned-tank-prizes")
-                page.locator("#dock-toggle").click()
-                require(not page.locator("#feed-button").is_visible(), "Controls did not collapse")
-                page.locator("#dock-toggle").click()
-                require(page.locator("#feed-button").is_visible(), "Controls did not expand")
+                menu_action("immerse")
+                require(not page.locator("#feed-button").is_visible(), "Controls did not hide in immersion")
+                page.locator("#exit-immersion").click()
+                require(page.locator("#feed-button").is_visible(), "Controls did not return after immersion")
 
-            check("Crab and eel defenses, milestone choice, persistent prizes, and collapsible controls", challenges_and_prizes)
+            check("Crab and eel defenses, milestone choice, round prizes, and quiet controls", challenges_and_prizes)
 
             def offline():
                 page.wait_for_function("ZQApp.offlineReady", timeout=15000)
-                page.locator("#home-button").click()
+                menu_action("home")
                 expected = page.evaluate("""() => {
                     const data = JSON.parse(localStorage.getItem('zenquarium_zq3d_v1'));
                     return { fish: data.session.fish.map(f => ({id:f.id,type:f.type})),
-                        prizes: data.profile.prizes, equipped: data.profile.equippedPrizes };
+                        prizes: data.session.prizes, equipped: data.session.equippedPrizes, positions: data.session.prizePositions };
                 }""")
                 page.evaluate("localStorage.setItem('zenquarium_save', JSON.stringify({sentinel:'original'}))")
                 context.set_offline(True)
@@ -395,7 +417,7 @@ def main():
                     page.locator("#resume-button").click()
                     actual = page.evaluate("""({
                         fish: ZQApp.game.state.fish.map(f => ({id:f.id,type:f.type})),
-                        prizes: ZQApp.profile.prizes, equipped: ZQApp.profile.equippedPrizes
+                        prizes: ZQApp.game.state.prizes, equipped: ZQApp.game.state.equippedPrizes, positions: ZQApp.game.state.prizePositions
                     })""")
                     require(actual == expected, "Offline resume lost residents, prizes, or placements")
                     require(page.evaluate("JSON.parse(localStorage.getItem('zenquarium_save')).sentinel") == "original", "Original Zenquarium save changed")
@@ -461,7 +483,7 @@ def main():
                     client.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
                     require(touch_page.evaluate("ZQApp.renderer.camera.zoom") < zoom, "Two-finger pinch did not zoom")
                     require(touch_page.evaluate("ZQApp.game.state.stats.taps") == 1, "A camera gesture accidentally stressed the fish")
-                    touch_page.locator("#residents-button").tap()
+                    menu_action("residents", touch_page)
                     require("Barreleye" in touch_page.locator("#resident-list").inner_text(), "Deep Ocean still lists a resident jellyfish")
                     touch_page.locator('[data-follow="2"]').tap()
                     require(touch_page.evaluate("ZQApp.renderer.camera.follow") == 2, "Secondary touch following is unavailable")
@@ -488,6 +510,7 @@ def main():
                     require(fallback_page.evaluate("!ZQApp.renderer.is3D"), "Fallback renderer was not selected")
                     fallback_page.locator("#begin-button").click()
                     fallback_page.locator("#feed-button").click()
+                    fallback_page.keyboard.press("Enter")
                     require(fallback_page.evaluate("ZQApp.game.state.food.length > 0"), "Fallback mode is not playable")
                     screenshot(fallback_page, "phone-compatibility")
                 finally:
