@@ -19,6 +19,15 @@
     };
     const make = (theme = 'tropical', profile = established()) => new core.Game(theme, profile, { seed: 12345, width: 1200, height: 800 });
     const envelope = game => ({ version: core.VERSION, profile: game.profile, settings: { ...core.DEFAULT_SETTINGS }, session: game.snapshot() });
+    const breedingPair = (g, type = 0) => {
+        while (g.state.fish.filter(f => f.type === type).length < 2) g.addFish(type);
+        const fish = g.state.fish.filter(f => f.type === type).slice(0, 2);
+        fish.forEach((f, i) => {
+            f.sex = i ? 'female' : 'male'; f.growth = 1; f.hunger = 100; f.health = 100;
+            f.fear = 0; f.socialCooldown = 0; f.pos = [i * 1.5, 1.5, 0]; f.vel = [0, 0, 0];
+        });
+        return fish;
+    };
     const steps = (game, seconds, dt = 1 / 60) => {
         for (let i = 0; i < Math.round(seconds / dt); i++) game.update(dt);
     };
@@ -44,7 +53,7 @@
         equal(core.ACHIEVEMENTS.length, 20);
         equal(core.MILESTONES.length, 5);
     });
-    test('Barreleye replaces only the resident jellyfish, including in existing saves', () => {
+    test('Barreleye is a finned resident distinct from the Crystal Jelly visitor', () => {
         const theme = core.THEMES.deep;
         equal(theme.fish[1].id, 'barreleye');
         equal(theme.fish[1].name, 'Barreleye');
@@ -53,30 +62,16 @@
         equal(theme.fish[1].traits, ['shy', 'explorer']);
         assert(theme.fish.every(f => f.id !== 'jelly' && f.name !== 'Jellyfish'));
         assert(theme.visitors.some(v => v.kind === 'jellyfish' && v.name === 'Crystal Jelly'));
-        for (const version of [1, 2]) {
+        for (const version of [core.VERSION]) {
             const g = make('deep');
             g.state.fish[1].health = 83;
             g.state.fish[1].hunger = 68;
             const saved = envelope(g);
             saved.version = version;
-            saved.session.fish.forEach(f => {
-                delete f.intent; delete f.activity; delete f.intentTime; delete f.roll;
-            });
-            delete saved.session.activity;
-            if (version === 1) {
-                delete saved.profile.prizes; delete saved.profile.equippedPrizes;
-                delete saved.profile.stats.crabsRepelled; delete saved.profile.stats.eelsRepelled;
-                delete saved.session.prizeEffects;
-            }
             const before = JSON.stringify(saved);
             const loaded = core.validateSave(saved);
             const resumed = new core.Game('deep', loaded.profile, { snapshot: loaded.session });
-            equal(resumed.state.fish.map(f => {
-                const legacy = { ...f };
-                delete legacy.intent; delete legacy.activity; delete legacy.intentTime; delete legacy.roll;
-                return legacy;
-            }), saved.session.fish);
-            assert(resumed.state.fish.every(f => f.intent === 'cruise' && f.intentTime === 6 && f.roll === 0));
+            equal(resumed.state.fish, saved.session.fish);
             equal(resumed.theme.fish[resumed.state.fish[1].type].name, 'Barreleye');
             equal(resumed.state.score, saved.session.score);
             equal(JSON.stringify(saved), before);
@@ -441,9 +436,12 @@
         for (let type = 0; type < 4; type++) while (g.state.fish.filter(f => f.type === type).length < 2) g.addFish(type);
         g.addFish(0);
         g.state.fish.forEach(f => { f.hunger = 100; f.health = 100; });
+        breedingPair(g);
         g.state.reproduction.fill(0);
         g.random = () => 0;
         g.reproduce(0.1);
+        equal(g.state.stats.born, 0);
+        for (let i = 0; i < 41; i++) g.reproduce(0.1);
         equal(g.state.fish.length, 10);
         equal(g.state.stats.born, 1);
         assert(g.state.fish.some(f => f.growth === 0));
@@ -704,27 +702,15 @@
         g.state.paused = false; steps(g, 0.5);
         near(g.state.prizeEffects.oyster, 5.5);
     });
-    test('Version-one saves migrate without changing original data or losing progress', () => {
-        const old = envelope(make('deep'));
-        old.version = 1;
-        delete old.profile.prizes; delete old.profile.equippedPrizes;
-        delete old.profile.stats.crabsRepelled; delete old.profile.stats.eelsRepelled;
-        delete old.session.prizeEffects;
-        delete old.session.activity;
-        old.session.fish.forEach(f => {
-            delete f.intent; delete f.activity; delete f.intentTime; delete f.roll;
-        });
-        const before = JSON.stringify(old);
-        const upgraded = core.validateSave(old);
-        equal(upgraded.version, core.VERSION);
-        equal(upgraded.profile.prizes, {});
-        equal(upgraded.profile.stats.eelsRepelled, 0);
-        equal(upgraded.session.fish.map(f => {
-            const legacy = { ...f };
-            delete legacy.intent; delete legacy.activity; delete legacy.intentTime; delete legacy.roll;
-            return legacy;
-        }), old.session.fish);
-        equal(JSON.stringify(old), before);
+    test('Older development saves are rejected unchanged with a fresh aquarium explanation', () => {
+        for (let version = 1; version < core.VERSION; version++) {
+            const old = envelope(make('deep')); old.version = version;
+            const before = JSON.stringify(old);
+            let error;
+            try { core.validateSave(old); } catch (e) { error = e; }
+            assert(error?.message.includes('fresh zq3d aquarium'));
+            equal(JSON.stringify(old), before);
+        }
     });
 
     test('Shared habitats are deterministic, quality independent, and include solid stacked rocks', () => {
@@ -745,7 +731,7 @@
             }
         }
     });
-    test('Residents choose sustained, species-influenced intentions and investigate plant edges', () => {
+    test('Residents choose sustained, species-influenced intentions and investigate clear habitat routes', () => {
         const g = make('koi');
         const f = g.state.fish[0];
         f.hunger = 100; f.intent = 'cruise'; f.intentTime = 12; f.target = [5, 2, 2];
@@ -758,7 +744,10 @@
         equal(f.intent, 'rest');
         g.chooseIntent(shy);
         equal(shy.intent, 'investigate');
-        assert(g.habitat.plants.some(plant => Math.abs(shy.target[0] - plant.x) < 2 && Math.abs(shy.target[2] - plant.z) < 1.6));
+        assert(['browse', 'explore'].includes(shy.habitatActivity));
+        equal(shy.target, shy.habitatRoute[0]);
+        assert(shy.habitatRoute.every(point => g.habitat.obstacles.every(rock =>
+            core.rockDistance(point, rock, core.fishScale(shy) * 0.8) >= 0.99)));
         assert(shy.intentTime >= 6);
         g.random = random;
     });
@@ -800,14 +789,10 @@
         g.updateFish(f, 1 / 60);
         equal(f.activity, 'evade');
     });
-    test('Legacy narrow habitats retain their shape and residents can clear boundary rocks', () => {
+    test('Narrow saved habitats retain their shape and residents can clear boundary rocks', () => {
         for (const theme of Object.keys(core.THEMES)) {
             const legacy = envelope(make(theme));
-            legacy.version = 2; legacy.session.bounds.width = 3.4;
-            if (theme === 'ink') legacy.session.fish.forEach(f => {
-                const old = [['social', 'lazy'], ['curious', 'explorer'], ['playful', 'social'], ['shy', 'brave']][f.type];
-                f.traits = Object.fromEntries(old.map(t => [t, 1]));
-            });
+            legacy.session.bounds.width = 3.4;
             const saved = core.validateSave(legacy);
             const g = new core.Game(theme, saved.profile, { snapshot: saved.session });
             g.resize(1440, 1000);
@@ -950,13 +935,8 @@
         equal(g.state.food.length, 0);
         assert(c.pos[0] > 2, 'The crab remained stuck on its original side of the rock');
     });
-    test('Version-three saves acquire approach state and new visit fields reject invalid data', () => {
-        const g = make(), old = JSON.parse(JSON.stringify(envelope(g)));
-        old.version = 3;
-        old.session.fish.forEach(f => { delete f.visitPhase; delete f.dwellTime; });
-        const saved = core.validateSave(old);
-        equal(saved.version, core.VERSION);
-        assert(saved.session.fish.every(f => f.visitPhase === 'approach' && f.dwellTime === 0));
+    test('Saved visit fields reject invalid data', () => {
+        const g = make();
         for (const [key, value] of [['visitPhase', 'teleport'], ['dwellTime', -1], ['dwellTime', 10]]) {
             const bad = JSON.parse(JSON.stringify(envelope(g)));
             bad.session.fish[0][key] = value;
@@ -1213,19 +1193,17 @@
             assert(g.state.creature !== c, `${theme} ${kind}: blocked on retreat`);
         }
     });
-    test('Version-four encounters migrate safely; warning state and shock victim identities are validated', () => {
+    test('Encounter warning state and shock victim identities are validated', () => {
         const g = make(), c = spawn(g, 'octopus');
         g.releaseCreatureAttack(c);
         const old = JSON.parse(JSON.stringify(envelope(g)));
-        old.version = 4; delete old.session.creature.holdCharge;
-        delete old.session.attacks[0].hitIds;
         const saved = core.validateSave(old);
         equal(saved.version, core.VERSION);
-        equal(saved.session.creature.phase, 'stalk');
-        equal(saved.session.creature.phaseTimer, core.CONFIG.encounterRest);
+        equal(saved.session.creature.phase, old.session.creature.phase);
+        equal(saved.session.creature.phaseTimer, old.session.creature.phaseTimer);
         equal(saved.session.attacks[0].kind, 'ink');
         equal(saved.session.attacks[0].hitIds, []);
-        equal(old.version, 4);
+        equal(old.version, core.VERSION);
         for (const mutate of [
             d => { d.session.creature.holdCharge = 9; },
             d => { d.session.creature.defenseStep = 1.5; },
@@ -1417,28 +1395,26 @@
         next.checkPrizes(); equal(next.state.prizes, {});
         equal(profile.highScore, 100000); equal(profile.stats.born, 50);
     });
-    test('Version-five saves retain their round collection and migrate Ink fish by slot without losing residents', () => {
+    test('Current saves retain round collections and species-specific Ink residents', () => {
         for (const theme of Object.keys(core.THEMES)) {
             const g = make(theme), old = envelope(g);
-            old.version = 5;
-            old.profile.prizes = { chest: '2026-01-01', oyster: '2026-01-02' };
-            old.profile.equippedPrizes = ['chest', 'oyster'];
-            delete old.session.prizes; delete old.session.equippedPrizes; delete old.session.prizePositions;
-            delete old.session.stats.crabsRepelled; delete old.session.stats.eelsRepelled;
+            g.state.score = 1000; g.state.stats.born = 1; g.checkPrizes();
+            g.equipPrize('chest'); g.equipPrize('oyster');
+            Object.assign(old, envelope(g));
             if (theme === 'ink') {
                 for (let i = 2; i < 4; i++) g.addFish(i);
                 old.session.fish = g.snapshot().fish;
                 old.session.nextId = g.state.nextId;
                 old.session.fish.forEach(f => {
-                    const traits = [['social', 'lazy'], ['curious', 'explorer'], ['playful', 'social'], ['shy', 'brave']][f.type];
+                    const traits = core.THEMES.ink.fish[f.type].traits;
                     f.traits = Object.fromEntries(traits.map((t, i) => [t, 0.8 + i * 0.4]));
                     f.hunger = 72; f.health = 87; f.growth = 0.73;
                 });
             }
             const before = JSON.stringify(old), saved = core.validateSave(old);
             equal(saved.version, core.VERSION);
-            equal(saved.session.prizes, old.profile.prizes);
-            equal(saved.session.equippedPrizes, old.profile.equippedPrizes);
+            equal(saved.session.prizes, old.session.prizes);
+            equal(saved.session.equippedPrizes, old.session.equippedPrizes);
             const refreshed = new core.Game(theme, saved.profile, { snapshot: saved.session });
             for (const id of saved.session.equippedPrizes)
                 assert(refreshed.prizeMoveCandidate(id, core.prizePositions(refreshed.state.bounds, [id], saved.session.prizePositions)[0].pos).ok);
@@ -1451,11 +1427,11 @@
                 if (theme === 'ink') equal(Object.values(traits), Object.values(oldTraits));
             });
             const resumed = new core.Game(theme, saved.profile, { snapshot: saved.session });
-            equal(resumed.state.prizes, old.profile.prizes);
+            equal(resumed.state.prizes, old.session.prizes);
             const fresh = make(theme, saved.profile);
             fresh.checkPrizes(); equal(fresh.state.prizes, {});
         }
-        const bad = envelope(make('ink')); bad.version = 5;
+        const bad = envelope(make('ink'));
         bad.session.fish[0].traits = { social: NaN, lazy: 1 };
         throws(() => core.validateSave(bad));
     });
@@ -1705,10 +1681,13 @@
         const g = make();
         for (let type = 0; type < 4; type++) while (g.state.fish.filter(f => f.type === type).length < 2) g.addFish(type);
         g.state.fish.forEach(f => { f.hunger = 100; f.health = 100; });
-        assert(g.state.reproduction.every(n => n >= 35 && n <= 65));
+        breedingPair(g);
+        assert(g.state.reproduction.every(n => n >= 25 && n <= 45));
         g.state.reproduction.fill(0); g.random = () => 0;
-        g.reproduce(0.1); equal(g.state.stats.born, 1);
-        assert(g.state.reproduction.every(n => n >= 35));
+        g.reproduce(0.1); equal(g.state.stats.born, 0);
+        for (let i = 0; i < 41; i++) g.reproduce(0.1);
+        equal(g.state.stats.born, 1);
+        assert(g.state.reproduction.every(n => n >= 25));
         for (let i = 0; i < 349; i++) g.reproduce(0.1);
         equal(g.state.stats.born, 1);
         const saved = core.validateSave(envelope(g));
@@ -1716,6 +1695,7 @@
         const next = make();
         while (next.state.fish.length < next.state.maxFish - 1) next.addFish(0);
         next.state.fish.forEach(f => f.hunger = 100);
+        breedingPair(next);
         next.state.reproduction.fill(0);
         next.random = () => core.CONFIG.birthChancePerSecond * 0.25;
         next.reproduce(1);
@@ -1830,10 +1810,12 @@
         resumed.updateAttacks(0.01); equal(resumed.state.fish.length, 0);
     });
     test('Sparse populations breed earlier without restoring explosive near-capacity growth', () => {
-        const g = make(); g.addFish(0);
+        const g = make(); breedingPair(g);
         g.state.fish.forEach(f => f.hunger = 100);
         g.state.reproduction.fill(0); g.random = () => 0.01;
-        g.reproduce(1); equal(g.state.stats.born, 1);
+        g.reproduce(1); equal(g.state.stats.born, 0);
+        for (let i = 0; i < 41; i++) g.reproduce(0.1);
+        equal(g.state.stats.born, 1);
         assert(g.state.reproduction.every(n => n < 90));
         const saved = envelope(g); saved.session.reproduction.fill(180);
         const resumed = new core.Game('tropical', saved.profile, { snapshot: saved.session });
@@ -1951,42 +1933,6 @@
                 }
             }
         }
-    });
-    test('Version-six habitats relocate blocked prizes without losing residents, ownership, statistics, or the original backup', () => {
-        let moved = 0;
-        for (const theme of Object.keys(core.THEMES)) {
-            const oldGame = make(theme), refreshed = make(theme), b = oldGame.state.bounds;
-            oldGame.state.prizes.oyster = refreshed.state.prizes.oyster = '2026-01-01';
-            oldGame.habitat = core.createHabitat(theme, b, [], {}, true);
-            let blocked = null;
-            for (let z = -b.depth; z <= b.depth && !blocked; z += 0.25) for (let x = -b.width + 1; x <= b.width - 1; x += 0.25) {
-                const candidate = oldGame.prizeMoveCandidate('oyster', [x, b.floor, z]);
-                if (candidate.ok && !refreshed.prizeMoveCandidate('oyster', candidate.pos).ok) { blocked = candidate.pos; break; }
-            }
-            if (!blocked) continue;
-            moved++;
-            oldGame.state.equippedPrizes = ['oyster']; oldGame.state.prizePositions.oyster = blocked;
-            const old = envelope(oldGame); old.version = 6;
-            const original = JSON.stringify(old), saved = core.validateSave(old);
-            equal(JSON.stringify(old), original);
-            equal(saved.version, core.VERSION);
-            equal(saved.session.prizes, old.session.prizes);
-            equal(saved.session.stats, old.session.stats);
-            equal(saved.profile, old.profile);
-            equal(saved.session.score, old.session.score);
-            equal(saved.session.fish.map(({ pos, ...rest }) => rest), old.session.fish.map(({ pos, ...rest }) => rest));
-            equal(saved.session.equippedPrizes, ['oyster']);
-            assert(JSON.stringify(saved.session.prizePositions.oyster) !== JSON.stringify(blocked));
-            assert(saved.session.activity.some(a => a.message.includes('habitat was refreshed')));
-            core.validateSave(saved);
-            const resumed = new core.Game(theme, saved.profile, { snapshot: saved.session });
-            assert(resumed.prizeMoveCandidate('oyster', saved.session.prizePositions.oyster).ok);
-            for (const f of resumed.state.fish)
-                assert(resumed.habitat.obstacles.every(s => core.rockDistance(f.pos, s, core.fishScale(f) * 0.8) >= 1.02));
-        }
-        assert(moved >= 2, 'Migration fixture must cover multiple changed habitats');
-        const old = envelope(make()); old.version = 6; old.session = null;
-        equal(core.validateSave(old).session, null);
     });
     test('Compatibility rendering retains Zen markings and filaments and all themed plant forms', () => {
         if (typeof ZQRenderer === 'undefined') return;
@@ -2197,18 +2143,16 @@
             assert(traversed >= 4 && completed >= 2, `${theme}: only ${traversed} waypoints and ${completed} complete routes`);
         }
     });
-    test('Version-seven landscape migration preserves placed and stored prizes and individual care', () => {
+    test('Landscape saves preserve placed and stored prizes and individual care', () => {
         for (const theme of Object.keys(core.THEMES)) {
             const g = make(theme), b = g.state.bounds;
-            g.habitat = core.createHabitat(theme, b, [], {}, 7);
             g.state.prizes = { oyster: '2026-01-01', chest: '2026-01-01' };
             for (const id of ['oyster', 'chest']) {
                 const pos = g.findPrizeSpot(id); assert(pos);
                 g.state.prizePositions[id] = pos;
                 if (id === 'oyster') { g.state.equippedPrizes.push(id); g.refreshPrizeObstacles(); }
             }
-            const old = envelope(g); old.version = 7;
-            old.session.fish.forEach(f => { delete f.habitatRoute; delete f.routeStep; delete f.habitatActivity; });
+            const old = envelope(g);
             const before = JSON.stringify(old), upgraded = core.validateSave(old);
             equal(JSON.stringify(old), before); equal(upgraded.version, core.VERSION);
             equal(upgraded.session.prizes, old.session.prizes); equal(upgraded.session.stats, old.session.stats);
@@ -2297,18 +2241,17 @@
         assert(outside > 30 && transitions >= 4, 'The camera still acts like a fish enclosure');
         equal(JSON.stringify(g.state.bounds), bounds);
     });
-    test('Version-eight terrain saves migrate all placements without discarding round progress', () => {
+    test('Terrain saves roundtrip all placements without discarding round progress', () => {
         for (const theme of Object.keys(core.THEMES)) {
             const g = make(theme), b = g.state.bounds;
-            g.habitat = core.createHabitat(theme, b, [], {}, 8);
             g.state.prizes = { oyster: '2026-01-01', chest: '2026-01-01' };
             for (const id of ['oyster', 'chest']) {
                 const pos = g.findPrizeSpot(id); assert(pos); g.state.prizePositions[id] = pos;
                 if (id === 'oyster') { g.state.equippedPrizes.push(id); g.refreshPrizeObstacles(); }
             }
-            const old = envelope(g); old.version = 8;
+            const old = envelope(g);
             const before = JSON.stringify(old), saved = core.validateSave(old);
-            equal(JSON.stringify(old), before); equal(saved.version, 9);
+            equal(JSON.stringify(old), before); equal(saved.version, core.VERSION);
             equal(saved.session.prizes, old.session.prizes); equal(saved.session.stats, old.session.stats);
             equal(saved.session.score, old.session.score); equal(saved.session.bounds, old.session.bounds);
             core.validateSave(saved);
@@ -2507,6 +2450,240 @@
             }
             assert(mouth > 0, `${def.id}: mouth has no animation marker`);
         }
+    });
+
+    const rivals = () => {
+        const g = make('ink'); g.state.fish = []; g.state.spawnTimer = 60;
+        const fish = breedingPair(g);
+        fish.forEach(f => { f.sex = 'male'; });
+        g.state.reproduction.fill(core.CONFIG.birthCooldown[1]);
+        return { g, fish };
+    };
+    test('Fish sexes are seeded, balanced, permanent through growth, and saved for living and departed residents', () => {
+        const g = make(), other = make();
+        equal(g.snapshot(), other.snapshot());
+        g.state.fish = [];
+        for (let i = 0; i < 1000; i++) g.addFish(0, i % 2 === 0);
+        const males = g.state.fish.filter(f => f.sex === 'male').length;
+        assert(males > 400 && males < 600, `Random sex assignment skewed: ${males}`);
+        g.state.fish = g.state.fish.slice(0, 10);
+        const before = g.state.fish.map(f => f.sex), baby = g.state.fish[0];
+        baby.growth = 0.9999; g.updateFish(baby, 0.1);
+        equal(baby.growth, 1); equal(g.state.fish.map(f => f.sex), before);
+        g.kill(baby, 'health'); equal(g.state.dead[0].sex, before[0]);
+        const saved = core.validateSave(envelope(g));
+        equal(saved.session.fish.map(f => f.sex), before.slice(1));
+        equal(saved.session.dead[0].sex, before[0]);
+    });
+    test('Courtship requires same-species healthy adult male and female rather than same-sex or mixed pairs', () => {
+        for (const cause of ['male', 'female', 'baby', 'species', 'hunger', 'health', 'water', 'cooldown']) {
+            const g = make(); g.state.fish = [];
+            const fish = breedingPair(g); g.state.reproduction.fill(0); g.random = () => 0;
+            if (cause === 'male' || cause === 'female') fish.forEach(f => { f.sex = cause; });
+            if (cause === 'baby') fish[1].growth = 0.9;
+            if (cause === 'species') fish[1].type = 1;
+            if (cause === 'hunger') fish[1].hunger = 60;
+            if (cause === 'health') fish[1].health = 70;
+            if (cause === 'water') g.state.tankHealth = 50;
+            if (cause === 'cooldown') fish[1].socialCooldown = 90;
+            for (let i = 0; i < 100; i++) g.reproduce(0.1);
+            equal(g.state.stats.born, 0); equal(g.state.courtships.length, 0);
+        }
+    });
+    test('Actual swimming completes a four-second courtship for every species without ignoring personal space', () => {
+        for (const theme of Object.keys(core.THEMES)) for (let type = 0; type < 4; type++) {
+            const g = make(theme); g.state.fish = []; g.state.spawnTimer = 60;
+            const fish = breedingPair(g, type);
+            g.state.reproduction.fill(0); g.random = () => 0;
+            steps(g, 3.5, 0.1); equal(g.state.stats.born, 0);
+            let courting = false;
+            for (let i = 0; i < 125 && !g.state.stats.born; i++) {
+                g.update(0.1); courting ||= fish.some(f => f.activity === 'court');
+            }
+            assert(courting && g.state.stats.born === 1, `${theme}/${type}: courtship never completed`);
+            const baby = g.state.fish.find(f => f.growth < 1);
+            assert(baby && ['male', 'female'].includes(baby.sex));
+            assert(core.distance(baby.pos, fish[1].pos) < 1);
+            equal(g.state.courtships.length, 0);
+            assert(g.state.reproduction.every(n => n > 0));
+            core.validateSave(envelope(g));
+        }
+    });
+    test('Courtship interruptions cancel safely on danger, obstacles, lost parents, poor care and capacity', () => {
+        for (const cause of ['visitor', 'hazard', 'obstacle', 'loss', 'water', 'hunger', 'capacity', 'timeout']) {
+            const g = make(); g.state.fish = []; const fish = breedingPair(g);
+            g.state.reproduction.fill(0); g.random = () => 0; g.reproduce(0.1);
+            equal(g.state.courtships.length, 1);
+            if (cause === 'visitor') { const c = spawn(g, 'octopus'); c.pos = [...fish[0].pos]; }
+            if (cause === 'hazard') g.state.attacks = [{ kind: 'shock', pos: [...fish[0].pos] }];
+            if (cause === 'obstacle') g.habitat.obstacles = [{ pos: [0.75, 1.5, 0], radius: [0.2, 1, 1] }];
+            if (cause === 'loss') g.kill(fish[0], 'health');
+            if (cause === 'water') g.state.tankHealth = 50;
+            if (cause === 'hunger') fish[1].hunger = 60;
+            if (cause === 'capacity') g.state.maxFish = 2;
+            if (cause === 'timeout') g.state.courtships[0].time = core.CONFIG.courtshipLimit - 0.05;
+            g.reproduce(0.1); equal(g.state.courtships.length, 0); equal(g.state.stats.born, 0);
+        }
+    });
+    test('Only nearby adult same-species male bettas start disputes in true unobstructed 3D space', () => {
+        for (const cause of ['female', 'baby', 'depth', 'height', 'species', 'other-world', 'cooldown', 'obstacle', 'danger', 'courtship']) {
+            const { g, fish } = rivals();
+            if (cause === 'female') fish[1].sex = 'female';
+            if (cause === 'baby') fish[1].growth = 0.9;
+            if (cause === 'depth') fish[1].pos[2] += 3;
+            if (cause === 'height') fish[1].pos[1] -= 3;
+            if (cause === 'species') fish[1].type = 1;
+            if (cause === 'other-world') { g.theme = core.THEMES.tropical; g.state.themeId = 'tropical'; }
+            if (cause === 'cooldown') fish[1].socialCooldown = 90;
+            if (cause === 'obstacle') g.habitat.obstacles = [{ pos: [0.75, 1.5, 0], radius: [0.2, 1, 1], box: true }];
+            if (cause === 'danger') { const c = spawn(g, 'octopus'); c.pos = [...fish[0].pos]; }
+            if (cause === 'courtship') g.state.courtships = [{ ids: fish.map(f => f.id), type: 0, time: 0, closeTime: 0 }];
+            g.updateDisputes(0.1); equal(g.state.disputes.length, 0);
+        }
+        const { g } = rivals(); g.updateDisputes(0.1); equal(g.state.disputes.length, 1);
+    });
+    test('Betta disputes display for four seconds, then fight for eight active seconds before a single loss', () => {
+        const { g, fish } = rivals(); g.updateDisputes(0.1);
+        for (let i = 0; i < 39; i++) g.updateDisputes(0.1);
+        equal(g.state.disputes[0].phase, 'warning'); equal(g.state.stats.lost, 0);
+        fish.forEach(f => equal(f.health, 100));
+        g.updateDisputes(0.1); equal(g.state.disputes[0].phase, 'fight');
+        for (let i = 0; i < 79; i++) g.updateDisputes(0.1);
+        equal(g.state.stats.lost, 0); assert(fish.every(f => f.health < 40));
+        g.updateDisputes(0.1); g.updateDisputes(0.1);
+        equal(g.state.stats.lost, 1); equal(g.state.fish.length, 1); equal(g.state.disputes.length, 0);
+        equal(g.state.fish[0].socialCooldown, 90);
+        assert(g.drainEvents().some(e => e.message.includes('territorial fight')));
+    });
+    test('Protective taps win over visitor provocation and glass stress in either dispute phase', () => {
+        for (const phase of ['warning', 'fight']) {
+            const { g, fish } = rivals(); g.updateDisputes(0.1);
+            g.state.disputes[0].phase = phase;
+            const c = spawn(g, 'octopus'); c.pos = [...fish[0].pos];
+            const taps = g.state.stats.taps, stress = g.state.stress, score = g.state.score, damage = g.state.damage;
+            assert(g.tap([...fish[1].pos]).separated);
+            equal(g.state.disputes.length, 0); equal(g.state.stats.taps, taps); equal(g.state.stress, stress);
+            equal(g.state.score, score); equal(g.state.damage, damage); assert(!c.provoked);
+            assert(fish.every(f => f.fear === 2 && f.socialCooldown === 90 && f.activity === 'evade'));
+            assert(core.distance(fish[0].target, fish[1].target) > 4);
+            g.updateDisputes(0.1); equal(g.state.disputes.length, 0);
+        }
+        const { g } = rivals(); g.updateDisputes(0.1);
+        assert(!g.tap([-6, -1, -2]).separated); equal(g.state.stats.taps, 1);
+    });
+    test('Live swimming preserves intervention windows and Zen care separates males without a loss', () => {
+        for (const automatic of [false, true]) {
+            const { g, fish } = rivals(); g.state.auto = automatic;
+            steps(g, automatic ? 2 : 13, 0.1);
+            if (automatic) {
+                equal(g.state.stats.lost, 0); equal(g.state.disputes.length, 0);
+                assert(fish.every(f => f.socialCooldown > 85));
+                assert(g.drainEvents().some(e => e.message.includes('Zen care separated')));
+            } else equal(g.state.stats.lost, 1);
+        }
+    });
+    test('Disputes and courtships persist, freeze on pause, and resume deterministically', () => {
+        for (const kind of ['courtship', 'warning', 'fight']) {
+            const { g, fish } = rivals();
+            if (kind === 'courtship') {
+                fish[1].sex = 'female'; g.state.reproduction.fill(0); g.random = () => 0;
+                g.reproduce(0.1);
+            } else {
+                g.updateDisputes(0.1); g.state.disputes[0].phase = kind;
+            }
+            steps(g, 0.5, 0.1);
+            const saved = core.validateSave(envelope(g)), copy = new core.Game('ink', core.clone(g.profile), { snapshot: saved.session });
+            const frozen = copy.snapshot(); steps(copy, 3, 0.1); equal(copy.snapshot(), frozen);
+            // Restore the RNG implementation before comparing the two continuations.
+            delete g.random; copy.resume();
+            steps(g, 0.5, 0.1); steps(copy, 0.5, 0.1);
+            equal(copy.snapshot(), g.snapshot());
+        }
+    });
+    test('Social save validation rejects missing sex, malformed timers and invalid or duplicate pair references', () => {
+        const { g } = rivals(); g.updateDisputes(0.1);
+        for (const mutate of [
+            d => { delete d.session.fish[0].sex; },
+            d => { d.session.fish[0].sex = 'unknown'; },
+            d => { d.session.fish[0].socialCooldown = -1; },
+            d => { d.session.fish[0].socialCooldown = 91; },
+            d => { delete d.session.courtships; },
+            d => { d.session.disputes[0].ids[1] = 999; },
+            d => { d.session.disputes[0].ids[1] = d.session.disputes[0].ids[0]; },
+            d => { d.session.disputes[0].phase = 'unknown'; },
+            d => { d.session.disputes[0].time = 4.1; },
+            d => { d.session.fish[1].sex = 'female'; },
+            d => { d.session.fish[1].growth = 0.5; },
+            d => { d.session.disputes.push(core.clone(d.session.disputes[0])); },
+            d => { d.session.courtships.push({ type: 0, ids: d.session.disputes[0].ids, time: 0, closeTime: 0 }); }
+        ]) {
+            const bad = envelope(g); mutate(bad); throws(() => core.validateSave(bad));
+        }
+        const c = make(); c.state.fish = []; breedingPair(c); c.state.reproduction.fill(0); c.random = () => 0; c.reproduce(0.1);
+        for (const mutate of [
+            d => { d.session.courtships[0].ids.reverse(); },
+            d => { d.session.courtships[0].type = 1; },
+            d => { d.session.courtships[0].time = 17; },
+            d => { d.session.courtships[0].closeTime = 1; },
+            d => { d.session.courtships.push(core.clone(d.session.courtships[0])); }
+        ]) { const bad = envelope(c); mutate(bad); throws(() => core.validateSave(bad)); }
+    });
+    test('Males use species-colored fins, flank ribbons and brighter natural patterns instead of generic bands', () => {
+        const kinds = new Set(), colors = new Set();
+        for (const def of Object.values(core.THEMES).flatMap(t => t.fish)) {
+            const mark = core.maleMark(def); kinds.add(mark.kind);
+            colors.add(mark.color);
+            assert(/^#[0-9a-f]{6}$/.test(mark.color));
+            assert(mark.color !== def.body);
+        }
+        equal([...kinds].sort(), [0, 1, 2]);
+        assert(colors.size >= 15, 'Male coloration still uses a generic shared palette');
+        equal(core.maleMark(core.THEMES.ink.fish[0]), { kind: 0, color: '#63dfdc' });
+        equal(core.maleMark(core.THEMES.deep.fish[2]), { kind: 2, color: '#73ffe0' });
+        equal(core.maleMark(core.THEMES.tropical.fish[3]), { kind: 1, color: '#eaff64' });
+        equal(core.THEMES.koi.name, 'Koi Pond');
+        equal(core.maleMark(core.THEMES.zen.fish[1]), { kind: 1, color: '#e598b2' });
+        equal(core.maleMark(core.THEMES.zen.fish[2]), { kind: 2, color: '#e598b2' });
+        equal(core.maleMark(core.THEMES.zen.fish[3]), { kind: 0, color: '#e598b2' });
+        throws(() => core.maleMark({ id: 'unknown' }));
+    });
+    test('Social activities suppress mouth bubbling', () => {
+        const g = make(), f = bubbleFish(g); f.age += 0.9;
+        assert(core.bubblePose(f).pulse > 0);
+        for (const activity of ['court', 'display', 'fight']) {
+            f.activity = activity; equal(core.bubblePose(f).amount, 0);
+        }
+    });
+    test('Breeding adjustments preserve care thresholds and capacity brakes while increasing sparse courtship odds', () => {
+        equal(core.CONFIG.birthCooldown, [25, 45]);
+        near(core.CONFIG.birthChancePerSecond, 0.05);
+        near(core.CONFIG.babyGrowth, 0.02); equal(core.CONFIG.courtshipTime, 4);
+        const g = make(); g.state.fish = [];
+        const fish = breedingPair(g);
+        fish[0].hunger = 60; assert(!g.breedingFish(fish[0]));
+        fish[0].hunger = 60.01; assert(g.breedingFish(fish[0]));
+        fish[0].health = 70; assert(!g.breedingFish(fish[0]));
+        fish[0].health = 70.01; assert(g.breedingFish(fish[0]));
+        g.state.reproduction.fill(0); g.random = () => 0.035;
+        g.reproduce(1);
+        equal(g.state.courtships.length, 1, 'The approved probability increase did not take effect');
+        g.state.courtships = []; g.state.tankHealth = 50;
+        g.reproduce(1); equal(g.state.courtships.length, 0);
+        g.state.tankHealth = 100; g.state.maxFish = 2;
+        g.random = () => 0; g.reproduce(1); equal(g.state.courtships.length, 0);
+    });
+    test('Resuming Zen care preserves the shared birth respite calculated against its smaller population cap', () => {
+        const g = make(); g.state.fish = []; breedingPair(g);
+        while (g.state.fish.length < 8) g.addFish(1);
+        g.state.auto = true; g.state.reproduction.fill(0); g.random = () => 0;
+        g.reproduce(0.1); equal(g.state.courtships.length, 1);
+        g.random = () => 0.999;
+        for (let i = 0; i < 41; i++) g.reproduce(0.1);
+        equal(g.state.stats.born, 1);
+        assert(g.state.reproduction.every(n => n > 100));
+        const saved = core.validateSave(envelope(g));
+        const resumed = new core.Game(g.theme.id, core.clone(g.profile), { snapshot: saved.session });
+        equal(resumed.state.reproduction, g.state.reproduction);
     });
 
     globalThis.ZQ_TEST_RESULTS = results;

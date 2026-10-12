@@ -1,15 +1,17 @@
 'use strict';
 
 const ZQ = (() => {
-    const VERSION = 9;
+    const VERSION = 10;
     const STORAGE_KEY = 'zenquarium_zq3d_v1';
     const CONFIG = Object.freeze({
         startingScore: 100, feedCost: 5, cleanCost: 10, scoreRate: 0.5,
         hungerDecay: 0.6, starvationDamage: 3, recoveryRate: 2,
         dirtRate: 0.3, dirtyWaterDamage: 2, cleanRepair: 30,
         foodNutrition: 30, foodLifetime: 15, foodLimit: 96,
-        babyGrowth: 0.02, birthChancePerSecond: 1 / 25,
-        birthCooldown: [35, 65], firstVisitor: [30, 60], nextVisitor: [45, 90],
+        babyGrowth: 0.02, birthChancePerSecond: 1 / 20,
+        courtshipTime: 4, courtshipLimit: 16, disputeWarning: 4, disputeFight: 8,
+        disputeRange: 2.1, disputeTapRange: 2.2, disputeCooldown: 90,
+        birthCooldown: [25, 45], firstVisitor: [30, 60], nextVisitor: [45, 90],
         visitorKillCooldown: 8, tapWindow: 5, emptyGrace: 5,
         stingerLife: 15, inkLife: 10, autoCap: 10, autoTarget: 5,
         crabDefenses: 3, decoyCooldown: 0.35, eelWarning: 2.6, eelDash: 1.2,
@@ -33,8 +35,8 @@ const ZQ = (() => {
     // Prices, personalities, musical scales, and UI palettes follow Zenquarium.
     const THEMES = {
         koi: {
-            id: 'koi', name: 'Koi Garden', subtitle: 'A moment in the sun',
-            description: 'Warm shallows, drifting blossoms, and the quiet company of koi.',
+            id: 'koi', name: 'Koi Pond', subtitle: 'A moment in the sun',
+            description: 'Lilies, warm water, and drifting koi.',
             location: 'SUNLIT GARDEN', sound: 'Pentatonic chimes',
             ui: { bg: '#0a1628', surface: '#12294a', text: '#e8dcc8', accent: '#e8845c' },
             water: '#234c4c', surface: '#82977e', sand: '#c8b58e', rock: '#72786b',
@@ -54,7 +56,7 @@ const ZQ = (() => {
         },
         tropical: {
             id: 'tropical', name: 'Tropical Reef', subtitle: 'Life in full color',
-            description: 'Sunbeams find their way through a living reef. Every fin has a story.',
+            description: 'Sunlit coral and curious reef fish.',
             location: 'CORAL SHALLOWS', sound: 'Island marimba',
             ui: { bg: '#061a2e', surface: '#083858', text: '#e8dcc8', accent: '#00d4aa' },
             water: '#064566', surface: '#50b8b0', sand: '#e0d5af', rock: '#627d89',
@@ -73,7 +75,7 @@ const ZQ = (() => {
         },
         deep: {
             id: 'deep', name: 'Deep Ocean', subtitle: 'Into the beautiful unknown',
-            description: 'Beyond the last light, a constellation of luminous creatures awakens.',
+            description: 'Luminous life beneath the last light.',
             location: 'MIDNIGHT ZONE', sound: 'Sub-oceanic resonance',
             ui: { bg: '#020508', surface: '#040a14', text: '#e8dcc8', accent: '#4dc9f6' },
             water: '#030c1b', surface: '#132847', sand: '#142733', rock: '#20394b',
@@ -93,7 +95,7 @@ const ZQ = (() => {
         },
         zen: {
             id: 'zen', name: 'Zen Garden', subtitle: 'Room to simply be',
-            description: 'Morning light, moss islands, delicate schools, and the space between things.',
+            description: 'Moss islands and delicate schools.',
             location: 'STILLWATER SANCTUARY', sound: 'Resonant singing bowls',
             ui: { bg: '#142b2c', surface: '#264745', text: '#eee9d9', accent: '#d7b77e' },
             water: '#215879', surface: '#7bafbd', sand: '#e3d4af', rock: '#8b9b91',
@@ -113,7 +115,7 @@ const ZQ = (() => {
         },
         ink: {
             id: 'ink', name: 'Pen & Ink', subtitle: 'An aquarium, imagined',
-            description: 'A living sketchbook. Paper, delicate lines, and a little imagination.',
+            description: 'Paper, fine lines, and living color.',
             location: 'THE ARTIST\'S AQUARIUM', sound: 'Impressionist piano',
             ui: { bg: '#e8e0d4', surface: '#f5f0e8', text: '#1a1a1a', accent: '#2a2a2a' },
             water: '#6d90a6', surface: '#c0d7df', sand: '#dec49b', rock: '#626c77',
@@ -191,6 +193,33 @@ const ZQ = (() => {
     };
     const fishScale = f => f.size * CONFIG.fishScale * (0.3 + 0.7 * f.growth);
     const fishSpacing = (a, b) => Math.max(CONFIG.separationRadius, fishScale(a) + fishScale(b) + CONFIG.separationPadding);
+    const maleMarks = {
+        'koi-orange': { kind: 2, color: '#246eb8' },
+        'koi-white': { kind: 2, color: '#fa3d79' },
+        'koi-red': { kind: 2, color: '#ffdb58' },
+        goldfish: { kind: 0, color: '#c652e0' },
+        clown: { kind: 0, color: '#42bfe8' },
+        tang: { kind: 1, color: '#fb63cc' },
+        angel: { kind: 2, color: '#b455d4' },
+        neon: { kind: 1, color: '#eaff64' },
+        angler: { kind: 2, color: '#69f4ff' },
+        barreleye: { kind: 1, color: '#ffb16d' },
+        lantern: { kind: 2, color: '#73ffe0' },
+        biolum: { kind: 0, color: '#d28cff' },
+        'zen-medaka': { kind: 1, color: '#e16a43' },
+        'zen-cloud': { kind: 1, color: '#e598b2' },
+        'zen-danio': { kind: 2, color: '#e598b2' },
+        'zen-threadfin': { kind: 0, color: '#e598b2' },
+        'ink-betta': { kind: 0, color: '#63dfdc' },
+        'ink-zebra': { kind: 1, color: '#f48661' },
+        'ink-killifish': { kind: 0, color: '#6ba7f4' },
+        'ink-glass': { kind: 1, color: '#ae68e8' }
+    };
+    const maleMark = def => {
+        const mark = maleMarks[def.id];
+        if (!mark) throw new Error('Unknown fish species for male coloration.');
+        return mark;
+    };
     const clone = value => JSON.parse(JSON.stringify(value));
     const capacity = (width, height) => clamp(Math.round(20 * width * height / 960000), 15, 20);
     const boundsFor = () => ({
@@ -488,7 +517,7 @@ const ZQ = (() => {
         const period = 16 + ((f.id * 0.41421356237) % 1) * 12;
         const time = f.age < first ? -1 : (f.age - first) % period;
         const active = time >= 0 && time < 1.8 && f.hunger >= 45 && f.health >= 50 &&
-            f.fear === 0 && f.burst === 0 && !['evade', 'forage'].includes(f.activity);
+            f.fear === 0 && f.burst === 0 && !['evade', 'forage', 'court', 'display', 'fight'].includes(f.activity);
         const amount = active ? Math.min(1, time / 0.3, (1.8 - time) / 0.3) : 0;
         const beat = Math.round(time / 0.3);
         const pulse = active && beat >= 1 && beat <= 5 ? Math.exp(-(((time - beat * 0.3) / 0.07) ** 2)) * amount : 0;
@@ -519,7 +548,8 @@ const ZQ = (() => {
             if (options.snapshot) {
                 this.state = clone(options.snapshot);
                 this.state.bubbles = [];
-                const breedingLimit = CONFIG.birthCooldown[1] * (1 + 2 * this.state.fish.length / this.state.maxFish);
+                const breedingCap = this.state.auto ? Math.min(CONFIG.autoCap, this.state.maxFish) : this.state.maxFish;
+                const breedingLimit = CONFIG.birthCooldown[1] * (1 + 2 * this.state.fish.length / breedingCap);
                 this.state.reproduction = this.state.reproduction.map(n => Math.min(n, breedingLimit));
                 if (this.state.creature) this.state.creature.holdCharge = 0;
                 this.state.paused = true;
@@ -535,6 +565,7 @@ const ZQ = (() => {
                 multiplier: 1, streak: 0, elapsed: 0, auto: false, paused: false,
                 ended: false, reason: '', outcome: '', fish: [], food: [], dead: [], bubbles: [],
                 creature: null, attacks: [], spawnTimer: 0, reproduction: [0, 0, 0, 0],
+                courtships: [], disputes: [],
                 timers: { perfect: 0, diversity: 0, neglect: 0, autoFeed: 0, autoClean: 0,
                     autoBuy: 0, empty: 0, hungerWarning: 0 },
                 stats: { born: 0, lost: 0, bought: 0, taps: 0, peak: 2,
@@ -795,6 +826,7 @@ const ZQ = (() => {
                 id: this.state.nextId++, type, pos: position ? this.constrain([...position]) : this.point(),
                 vel: [this.range(-0.6, 0.6), 0, this.range(-0.2, 0.2)], target: this.point(),
                 hunger: 50, health: 100, growth: baby ? 0 : 1, age: 0,
+                sex: this.random() < 0.5 ? 'male' : 'female', socialCooldown: 0,
                 phase: this.range(0, Math.PI * 2), yaw: this.range(-Math.PI, Math.PI), pitch: 0,
                 retarget: this.range(1.5, 4), burst: 0, fear: 0, schooling: false,
                 intent: 'cruise', activity: 'cruise', intentTime: this.range(6, 12), roll: 0,
@@ -835,7 +867,7 @@ const ZQ = (() => {
             const added = this.addFish(type);
             this.state.stats.bought++;
             this.state.timers.empty = 0;
-            this.emit('purchase', `${def.name} joined your aquarium.`);
+            this.emit('purchase', `A ${added.sex} ${def.name} joined your aquarium.`);
             this.unlock('first-fish');
             this.checkAchievements();
             return { ok: true, fish: added };
@@ -885,6 +917,14 @@ const ZQ = (() => {
         }
         tap(point) {
             if (!this.actionable()) return this.reject('Resume your aquarium to interact.');
+            const dispute = this.state.disputes.find(pair => {
+                const fish = pair.ids.map(id => this.state.fish.find(f => f.id === id));
+                return fish.every(Boolean) && fish.some(f => distance(f.pos, point) <= CONFIG.disputeTapRange);
+            });
+            if (dispute) {
+                this.breakDispute(dispute, false);
+                return { ok: true, separated: true };
+            }
             this.state.stats.taps++;
             this.state.stress += 3;
             const c = this.state.creature;
@@ -1159,14 +1199,23 @@ const ZQ = (() => {
             const index = this.state.fish.indexOf(f);
             if (index < 0) return;
             this.state.fish.splice(index, 1);
-            this.state.dead.push({ type: f.type, pos: [...f.pos], yaw: f.yaw, pitch: f.pitch,
+            this.state.dead.push({ type: f.type, sex: f.sex, pos: [...f.pos], yaw: f.yaw, pitch: f.pitch,
                 phase: f.phase, growth: f.growth, size: f.size, age: 0 });
+            this.state.courtships = this.state.courtships.filter(pair => !pair.ids.includes(f.id));
+            this.state.disputes = this.state.disputes.filter(pair => {
+                if (!pair.ids.includes(f.id)) return true;
+                for (const id of pair.ids) {
+                    const survivor = this.state.fish.find(other => other.id === id);
+                    if (survivor) survivor.socialCooldown = CONFIG.disputeCooldown;
+                }
+                return false;
+            });
             this.state.stats.lost++;
             this.profile.stats.lost++;
             const starvation = cause === 'starvation';
             const name = this.theme.fish[f.type].name;
             this.award(-CONFIG.penalties[starvation ? 'starvation' : 'death'],
-                `${name} ${starvation ? 'was lost to hunger' : cause === 'predator' ? 'was caught by a predator' : 'was lost'}.`, 'loss');
+                `${name} ${starvation ? 'was lost to hunger' : cause === 'predator' ? 'was caught by a predator' : cause === 'fight' ? 'was lost in a territorial fight' : 'was lost'}.`, 'loss');
         }
         updateFish(f, dt) {
             const s = this.state;
@@ -1175,6 +1224,7 @@ const ZQ = (() => {
             f.age += dt;
             f.growth = Math.min(1, f.growth + CONFIG.babyGrowth * dt);
             f.fear = Math.max(0, f.fear - dt);
+            f.socialCooldown = Math.max(0, f.socialCooldown - dt);
             f.burst = Math.max(0, f.burst - dt);
             f.retarget = Math.max(-0.1, f.retarget - dt);
             if (!['evade', 'forage'].includes(f.activity)) f.intentTime = Math.max(0, f.intentTime - dt);
@@ -1300,6 +1350,31 @@ const ZQ = (() => {
                     } else speed *= 0.18;
                 }
                 speed *= clamp(distance(f.pos, target) * 1.5, 0, 1);
+            }
+            const pair = s.disputes.find(p => p.ids.includes(f.id)) || s.courtships.find(p => p.ids.includes(f.id));
+            const partner = pair && s.fish.find(other => other.id === pair.ids.find(id => id !== f.id));
+            if (partner && !threat && f.fear === 0) {
+                const disputing = s.disputes.includes(pair);
+                const center = f.pos.map((n, i) => (n + partner.pos[i]) / 2);
+                const side = pair.ids[0] === f.id ? 1 : -1;
+                const angle = s.elapsed * (disputing ? 1.8 : 0.65) + side * Math.PI / 2;
+                const charge = disputing && pair.phase === 'fight' && Math.sin(pair.time * 3) > 0.45;
+                const radius = Math.max(fishSpacing(f, partner) * 0.55, disputing ? 0.65 : 0.8);
+                target = this.clearRock(charge ? partner.pos : [
+                    center[0] + Math.cos(angle) * radius, center[1] + Math.sin(angle * 0.7) * 0.25,
+                    center[2] + Math.sin(angle) * radius], fishScale(f) * 0.8);
+                f.activity = disputing ? pair.phase === 'warning' ? 'display' : 'fight' : 'court';
+                speed = disputing ? charge ? 2 : 0.65 : def.speed * 0.7;
+                school = false;
+            } else if (!partner && f.socialCooldown > 0 && def.shape === 'betta' && f.sex === 'male' && !threat && f.fear === 0) {
+                const rival = s.fish.find(other => other !== f && other.type === f.type && other.sex === 'male' &&
+                    distance(f.pos, other.pos) < CONFIG.disputeRange * 1.6);
+                if (rival) {
+                    target = this.clearRock(f.pos.map((n, i) => n + (n - rival.pos[i]) * 2), fishScale(f) * 0.8);
+                    speed = Math.max(1, def.speed * 1.6);
+                    f.activity = 'evade';
+                    school = false;
+                }
             }
             const rhythm = swimRhythm(f, def);
             if (f.activity !== 'evade' && f.activity !== 'forage') speed *= rhythm.pace;
@@ -1746,25 +1821,126 @@ const ZQ = (() => {
             }
             s.attacks = s.attacks.filter(a => a.age < a.life);
         }
+        clearSocialPath(a, b) {
+            for (const solid of this.habitat.obstacles) {
+                const start = a.map((n, i) => (n - solid.pos[i]) / (solid.radius[i] + 0.05));
+                const delta = b.map((n, i) => (n - a[i]) / (solid.radius[i] + 0.05));
+                if (solid.box) {
+                    let low = 0, high = 1;
+                    for (let i = 0; i < 3; i++) {
+                        if (Math.abs(delta[i]) < 1e-9) {
+                            if (Math.abs(start[i]) >= 1) { low = 2; break; }
+                        } else {
+                            const x = (-1 - start[i]) / delta[i], y = (1 - start[i]) / delta[i];
+                            low = Math.max(low, Math.min(x, y)); high = Math.min(high, Math.max(x, y));
+                        }
+                    }
+                    if (low < high) return false;
+                } else {
+                    const length = delta.reduce((n, v) => n + v * v, 0);
+                    const t = length ? clamp(-start.reduce((n, v, i) => n + v * delta[i], 0) / length, 0, 1) : 0;
+                    if (start.reduce((n, v, i) => n + (v + delta[i] * t) ** 2, 0) < 1) return false;
+                }
+            }
+            return true;
+        }
+        calmFish(f) {
+            if (f.fear > 0 || f.growth < 1) return false;
+            const c = this.state.creature;
+            if (c && !c.defended && distance(f.pos, c.pos) < 3.2) return false;
+            return !this.state.attacks.some(a => (a.kind === 'stingers' ? a.nodes : [a.pos])
+                .some(pos => distance(f.pos, pos) < (a.kind === 'shock' ? 2.8 : a.kind === 'ink' ? 2.1 : 1.2)));
+        }
+        breedingFish(f) {
+            return this.calmFish(f) && f.socialCooldown === 0 && f.hunger > 60 && f.health > 70 &&
+                !this.state.disputes.some(pair => pair.ids.includes(f.id));
+        }
+        breakDispute(pair, automatic) {
+            const fish = pair.ids.map(id => this.state.fish.find(f => f.id === id));
+            this.state.disputes = this.state.disputes.filter(p => p !== pair);
+            for (let i = 0; i < fish.length; i++) {
+                const f = fish[i], other = fish[1 - i];
+                if (!f) continue;
+                const away = other && distance(f.pos, other.pos) > 0.05
+                    ? normalize(f.pos.map((n, axis) => n - other.pos[axis])) : [i ? 1 : -1, 0.15, i ? 0.5 : -0.5];
+                f.target = this.clearRock(f.pos.map((n, axis) => n + away[axis] * 3), fishScale(f) * 0.8);
+                f.fear = 2; f.socialCooldown = CONFIG.disputeCooldown;
+                f.habitatRoute = []; f.routeStep = 0; f.retarget = 2; f.intentTime = 6;
+                f.activity = 'evade';
+            }
+            this.emit('separated', automatic ? 'Zen care separated the rival bettas.' : 'The bettas have separated. A little space to settle.');
+        }
+        updateDisputes(dt) {
+            const s = this.state;
+            for (const pair of [...s.disputes]) {
+                const fish = pair.ids.map(id => s.fish.find(f => f.id === id));
+                if (fish.some(f => !f || !this.calmFish(f)) || distance(fish[0].pos, fish[1].pos) > 4 ||
+                    !this.clearSocialPath(fish[0].pos, fish[1].pos)) {
+                    this.breakDispute(pair, false);
+                    continue;
+                }
+                pair.time += dt;
+                if (s.auto && pair.time >= 1) { this.breakDispute(pair, true); continue; }
+                if (pair.phase === 'warning' && pair.time >= CONFIG.disputeWarning) {
+                    pair.phase = 'fight'; pair.time = 0;
+                    this.emit('dispute', 'Male bettas are fighting. Tap near them to separate them.');
+                } else if (pair.phase === 'fight') {
+                    for (const f of fish) f.health = Math.max(1, f.health - dt * 8);
+                    if (pair.time >= CONFIG.disputeFight) {
+                        const loser = fish[0].health < fish[1].health ? fish[0] : fish[1];
+                        this.kill(loser, 'fight');
+                    }
+                }
+            }
+            if (this.demo || s.disputes.length) return;
+            const males = s.fish.filter(f => f.sex === 'male' && this.theme.fish[f.type].shape === 'betta' &&
+                this.calmFish(f) && f.socialCooldown === 0 && f.health > 30 &&
+                !s.courtships.some(pair => pair.ids.includes(f.id)));
+            for (let i = 0; i < males.length; i++) for (let j = i + 1; j < males.length; j++) {
+                const a = males[i], b = males[j];
+                if (a.type !== b.type || distance(a.pos, b.pos) > CONFIG.disputeRange || !this.clearSocialPath(a.pos, b.pos)) continue;
+                s.disputes.push({ ids: [a.id, b.id], phase: 'warning', time: 0 });
+                this.emit('dispute', 'Male bettas are displaying. Tap near them before they fight.');
+                return;
+            }
+        }
         reproduce(dt) {
             const s = this.state;
             const cap = s.auto ? Math.min(CONFIG.autoCap, s.maxFish) : s.maxFish;
             s.reproduction = s.reproduction.map(n => Math.max(0, n - dt));
-            for (let type = 0; type < 4; type++) {
-                if (s.fish.length >= cap || s.reproduction[type] > 0 || s.tankHealth <= 50) continue;
-                const adults = s.fish.filter(f => f.type === type && f.growth === 1 && f.hunger >= 50 && f.health >= 60);
-                if (adults.length < 2) continue;
-                const hunger = adults.reduce((n, f) => n + f.hunger, 0) / adults.length;
-                const health = adults.reduce((n, f) => n + f.health, 0) / adults.length;
+            for (const pair of [...s.courtships]) {
+                const fish = pair.ids.map(id => s.fish.find(f => f.id === id));
+                pair.time += dt;
+                if (s.fish.length >= cap || s.tankHealth <= 50 || fish.some(f => !f || !this.breedingFish(f)) ||
+                    pair.time >= CONFIG.courtshipLimit || !this.clearSocialPath(fish[0].pos, fish[1].pos)) {
+                    s.courtships = s.courtships.filter(p => p !== pair);
+                    s.reproduction[pair.type] = Math.max(s.reproduction[pair.type], 10);
+                    continue;
+                }
+                if (distance(fish[0].pos, fish[1].pos) <= Math.max(2.1, fishSpacing(fish[0], fish[1]) * 1.25)) pair.closeTime += dt;
+                else pair.closeTime = 0;
+                if (pair.closeTime < CONFIG.courtshipTime) continue;
                 const room = (cap - s.fish.length) / cap;
-                if (hunger > 65 && health > 70 && this.random() < 1 - Math.pow(1 - CONFIG.birthChancePerSecond * room * room, dt)) {
-                    const parent = this.pick(adults);
-                    this.addFish(type, true, parent.pos.map(n => n + this.range(-0.3, 0.3)));
-                    s.stats.born++;
-                    this.profile.stats.born++;
-                    this.award(CONFIG.bonuses.birth, `A baby ${this.theme.fish[type].name}!`, 'birth');
-                    s.reproduction = s.reproduction.map(() => this.range(...CONFIG.birthCooldown) * (1 + (1 - room) * 2));
-                    if (s.stats.born >= 3) this.unlock('baby-boom');
+                this.addFish(pair.type, true, fish[1].pos.map(n => n + this.range(-0.3, 0.3)));
+                s.stats.born++; this.profile.stats.born++;
+                this.award(CONFIG.bonuses.birth, `A baby ${this.theme.fish[pair.type].name}!`, 'birth');
+                s.reproduction = s.reproduction.map(() => this.range(...CONFIG.birthCooldown) * (1 + (1 - room) * 2));
+                s.courtships = [];
+                if (s.stats.born >= 3) this.unlock('baby-boom');
+                break;
+            }
+            for (let type = 0; type < 4; type++) {
+                if (s.fish.length >= cap || s.reproduction[type] > 0 || s.tankHealth <= 50 ||
+                    s.courtships.some(pair => pair.type === type)) continue;
+                const adults = s.fish.filter(f => f.type === type && this.breedingFish(f));
+                const male = adults.find(f => f.sex === 'male' && adults.some(other => other.sex === 'female' &&
+                    distance(f.pos, other.pos) < 4 && this.clearSocialPath(f.pos, other.pos)));
+                const female = male && adults.find(f => f.sex === 'female' && distance(male.pos, f.pos) < 4 &&
+                    this.clearSocialPath(male.pos, f.pos));
+                if (!female) continue;
+                const room = (cap - s.fish.length) / cap;
+                if (this.random() < 1 - Math.pow(1 - CONFIG.birthChancePerSecond * room * room, dt)) {
+                    s.courtships.push({ type, ids: [male.id, female.id], time: 0, closeTime: 0 });
                 }
             }
         }
@@ -1870,6 +2046,7 @@ const ZQ = (() => {
                 item.pos[1] = settled ? ground : Math.max(item.pos[1], ground);
             }
             s.food = s.food.filter(item => item.age < CONFIG.foodLifetime);
+            if (!this.demo) this.updateDisputes(dt);
             for (const f of [...s.fish]) {
                 if (s.fish.includes(f)) this.updateFish(f, dt);
             }
@@ -1956,101 +2133,7 @@ const ZQ = (() => {
         const milestones = MILESTONES.map(m => m.id);
         const prizeIds = PRIZES.map(p => p.id);
         record(data, 'save');
-        if (data.version === 1) {
-            data = clone(data);
-            record(data.profile, 'profile');
-            record(data.profile.stats, 'lifetime statistics');
-            data.version = 2;
-            data.profile.prizes = {};
-            data.profile.equippedPrizes = [];
-            data.profile.stats.crabsRepelled = 0;
-            data.profile.stats.eelsRepelled = 0;
-            if (data.session !== null) {
-                record(data.session, 'session');
-                data.session.prizeEffects = {};
-                if (data.session.creature) Object.assign(data.session.creature, {
-                    phase: 'drift', phaseTimer: 5, defenseStep: 0, lastLure: 0, decoyCooldown: 0,
-                    defended: false, targetId: null, targetPoint: null
-                });
-            }
-        }
-        if (data.version === 2) {
-            data = clone(data);
-            data.version = 3;
-            if (data.session !== null) {
-                record(data.session, 'session');
-                list(data.session.fish, 20, 'fish');
-                data.session.activity = [];
-                data.session.fish.forEach(f => {
-                    record(f, 'fish');
-                    Object.assign(f, { intent: 'cruise', activity: 'cruise', intentTime: 6, roll: 0 });
-                });
-            }
-        }
-        if (data.version === 3) {
-            data = clone(data);
-            data.version = 4;
-            if (data.session !== null) {
-                record(data.session, 'session');
-                list(data.session.fish, 20, 'fish');
-                data.session.fish.forEach(f => {
-                    record(f, 'fish');
-                    Object.assign(f, { visitPhase: 'approach', dwellTime: 0 });
-                });
-            }
-        }
-        if (data.version === 4) {
-            data = clone(data);
-            data.version = 5;
-            if (data.session !== null) {
-                record(data.session, 'session');
-                if (data.session.creature) {
-                    const c = data.session.creature;
-                    record(c, 'visitor');
-                    bool(c.provoked, 'visitor state'); bool(c.defended, 'visitor defense');
-                    if (!['drift', 'forage', 'stalk', 'windup', 'dash', 'leaving'].includes(c.phase)) fail('visitor behavior');
-                    c.holdCharge = 0;
-                    if (c.kind === 'crab' && !c.entered) c.pos[2] = data.session.bounds.depth + 2;
-                    // Previously departing visitors stay departing; active visitors get a fresh warning.
-                    if (c.provoked || c.defended) {
-                        c.defended = true; c.phase = 'leaving'; c.flee = 12;
-                    } else {
-                        c.phase = 'stalk'; c.phaseTimer = CONFIG.encounterRest;
-                        c.flee = 0; c.targetId = null; c.targetPoint = null;
-                    }
-                }
-                list(data.session.attacks, 4, 'hazards');
-                data.session.attacks.forEach(a => { record(a, 'hazard'); a.hitIds = []; });
-            }
-        }
-        if (data.version === 5) {
-            data = clone(data);
-            data.version = 6;
-            if (data.session !== null) {
-                record(data.session, 'session'); record(data.profile, 'profile');
-                record(data.profile.prizes, 'prize collection');
-                list(data.profile.equippedPrizes, CONFIG.prizeLimit, 'placed prizes');
-                data.session.prizes = clone(data.profile.prizes);
-                data.session.equippedPrizes = clone(data.profile.equippedPrizes);
-                data.session.prizePositions = {};
-                record(data.session.stats, 'session statistics');
-                data.session.stats.crabsRepelled = 0; data.session.stats.eelsRepelled = 0;
-                if (data.session.themeId === 'ink') {
-                    list(data.session.fish, 20, 'fish');
-                    const oldTraits = [['social', 'lazy'], ['curious', 'explorer'], ['playful', 'social'], ['shy', 'brave']];
-                    for (const f of data.session.fish) {
-                        record(f, 'fish'); record(f.traits, 'fish traits');
-                        const old = oldTraits[f.type], next = THEMES.ink.fish[f.type];
-                        if (!old || !next || Object.keys(f.traits).length !== 2 || old.some(t => !Object.hasOwn(f.traits, t))) fail('fish traits');
-                        f.traits = Object.fromEntries(next.traits.map((t, i) => [t, f.traits[old[i]]]));
-                    }
-                }
-            }
-        }
-        const priorVersion = data.version;
-        const upgradeHabitat = priorVersion === 6 || priorVersion === 7 || priorVersion === 8;
-        if (upgradeHabitat) { data = clone(data); data.version = VERSION; }
-        if (data.version !== VERSION) throw new Error('This saved aquarium uses a different version. It has not been changed.');
+        if (data.version !== VERSION) throw new Error('This development save predates fish sexes and social encounters. Start a fresh zq3d aquarium from Settings; the old save has not been changed.');
         record(data.profile, 'profile');
         const p = data.profile;
         num(p.highScore, 0, 1e12, 'best score');
@@ -2074,10 +2157,6 @@ const ZQ = (() => {
         if (data.session === null) return data;
         const s = data.session;
         record(s, 'session');
-        if (upgradeHabitat) {
-            list(s.fish, 20, 'fish');
-            s.fish.forEach(f => { record(f, 'fish'); Object.assign(f, { habitatRoute: [], routeStep: 0, habitatActivity: '' }); });
-        }
         if (!Object.hasOwn(THEMES, s.themeId)) fail('theme');
         num(s.seed, 1, 4294967295, 'random state');
         num(s.nextId, 1, 1e9, 'fish identity counter');
@@ -2113,7 +2192,7 @@ const ZQ = (() => {
         for (const [id, pos] of Object.entries(s.prizePositions)) {
             if (!Object.hasOwn(s.prizes, id)) fail('prize position identity');
             vector(pos, 'prize position');
-            const terrain = upgradeHabitat && priorVersion < 8 ? null : createTerrain(s.themeId, s.bounds, upgradeHabitat ? priorVersion : VERSION);
+            const terrain = createTerrain(s.themeId, s.bounds);
             const floor = terrain ? terrainHeight(terrain, pos[0], pos[2]) : s.bounds.floor;
             if (Math.abs(pos[1] - (prizePositions(s.bounds, [id])[0].pos[1] + floor - s.bounds.floor)) > 1e-7) fail('prize floor position');
             for (const part of createPrizeObstacles(s.bounds, [id], { [id]: pos })) {
@@ -2123,7 +2202,7 @@ const ZQ = (() => {
                     if (Math.abs(terrainHeight(terrain, part.pos[0] + dx, part.pos[2] + dz) - floor) > 0.12) fail('prize slope');
                 }
             }
-            const placedHabitat = createHabitat(s.themeId, s.bounds, s.equippedPrizes, s.prizePositions, upgradeHabitat ? priorVersion : VERSION);
+            const placedHabitat = createHabitat(s.themeId, s.bounds, s.equippedPrizes, s.prizePositions);
             for (const part of placedHabitat.prizeObstacles) {
                 if (!Object.hasOwn(s.prizePositions, part.prizeId)) continue;
                 if (placedHabitat.obstacles.some(other => other.prizeId !== part.prizeId && rockDistance(part.pos, other, part.radius) < 1.03)) fail('overlapping prize position');
@@ -2158,6 +2237,7 @@ const ZQ = (() => {
             num(f.size, 0.1, 3, 'fish size');
             num(f.growth, 0, 1, 'fish growth');
             num(f.age, 0, 1e9, 'fish age');
+            if (!['male', 'female'].includes(f.sex)) fail('fish sex');
             if (!living) return;
             num(f.id, 1, s.nextId - 1, 'fish identity');
             if (!Number.isInteger(f.id) || ids.has(f.id)) fail('fish identity');
@@ -2166,9 +2246,10 @@ const ZQ = (() => {
             num(f.hunger, 0, 100, 'fish hunger'); num(f.health, 0, 100, 'fish health');
             num(f.retarget, -0.101, 4, 'fish direction timer');
             num(f.burst, 0, 2, 'fish dart timer'); num(f.fear, 0, 2, 'fish fear');
+            num(f.socialCooldown, 0, CONFIG.disputeCooldown, 'fish social cooldown');
             bool(f.schooling, 'schooling');
             if (!['cruise', 'investigate', 'rest', 'socialize'].includes(f.intent) ||
-                !['cruise', 'investigate', 'rest', 'socialize', 'forage', 'evade'].includes(f.activity)) fail('fish intention');
+                !['cruise', 'investigate', 'rest', 'socialize', 'forage', 'evade', 'court', 'display', 'fight'].includes(f.activity)) fail('fish intention');
             num(f.intentTime, 0, 60, 'fish intention timer');
             if (!['approach', 'dwell'].includes(f.visitPhase)) fail('habitat visit phase');
             num(f.dwellTime, 0, 9, 'habitat dwell timer');
@@ -2183,6 +2264,31 @@ const ZQ = (() => {
             allowed.forEach(key => num(f.traits[key], 0.7, 1.3, 'trait intensity'));
         };
         s.fish.forEach(f => fishShape(f, true));
+        const paired = new Set(), courtingTypes = new Set();
+        const pairFish = (pair, path) => {
+            record(pair, path); list(pair.ids, 2, `${path} participants`);
+            if (pair.ids.length !== 2 || new Set(pair.ids).size !== 2) fail(`${path} participants`);
+            const fish = pair.ids.map(id => s.fish.find(f => f.id === id));
+            if (fish.some(f => !f || f.growth !== 1 || paired.has(f.id)) || fish[0].type !== fish[1].type) fail(`${path} participants`);
+            fish.forEach(f => paired.add(f.id));
+            return fish;
+        };
+        list(s.courtships, 4, 'courtships');
+        s.courtships.forEach(pair => {
+            const fish = pairFish(pair, 'courtship');
+            if (pair.type !== fish[0].type || fish[0].sex !== 'male' || fish[1].sex !== 'female' || courtingTypes.has(pair.type)) fail('breeding pair');
+            courtingTypes.add(pair.type);
+            num(pair.time, 0, CONFIG.courtshipLimit, 'courtship time');
+            num(pair.closeTime, 0, CONFIG.courtshipTime, 'courtship proximity time');
+            if (pair.closeTime > pair.time) fail('courtship proximity time');
+        });
+        list(s.disputes, 1, 'disputes');
+        s.disputes.forEach(pair => {
+            const fish = pairFish(pair, 'dispute');
+            if (fish.some(f => f.sex !== 'male' || THEMES[s.themeId].fish[f.type].shape !== 'betta') ||
+                !['warning', 'fight'].includes(pair.phase)) fail('territorial rivals');
+            num(pair.time, 0, pair.phase === 'warning' ? CONFIG.disputeWarning : CONFIG.disputeFight, 'dispute time');
+        });
         list(s.dead, 20, 'departed fish'); s.dead.forEach(f => fishShape(f, false));
         list(s.food, CONFIG.foodLimit, 'food');
         s.food.forEach(f => {
@@ -2229,39 +2335,12 @@ const ZQ = (() => {
             if (new Set(a.hitIds).size !== a.hitIds.length || a.kind !== 'shock' && a.hitIds.length) fail('shock victims');
             a.hitIds.forEach(id => { num(id, 1, s.nextId - 1, 'shock victim'); if (!Number.isInteger(id)) fail('shock victim'); });
         });
-        if (upgradeHabitat) {
-            const restored = new Game(s.themeId, p, { snapshot: s });
-            for (const id of new Set([...restored.state.equippedPrizes, ...Object.keys(restored.state.prizePositions)])) {
-                const current = prizePositions(s.bounds, [id], restored.state.prizePositions)[0].pos;
-                const candidate = restored.prizeMoveCandidate(id, current);
-                if (candidate.ok) {
-                    restored.state.prizePositions[id] = candidate.pos;
-                    restored.refreshPrizeObstacles();
-                    continue;
-                }
-                const spot = restored.findPrizeSpot(id);
-                if (spot) {
-                    restored.state.prizePositions[id] = spot;
-                    restored.emit('arrange', 'A prize moved to open sand as the habitat was refreshed.');
-                } else {
-                    restored.state.equippedPrizes = restored.state.equippedPrizes.filter(placed => placed !== id);
-                    delete restored.state.prizePositions[id];
-                    restored.emit('warning', 'A prize returned to your collection because the refreshed habitat has no open sand.');
-                }
-                restored.refreshPrizeObstacles();
-            }
-            data.session = restored.snapshot();
-            data.session.paused = s.paused;
-            data.session.fish.forEach(f => {
-                if (!f.habitatRoute.length) f.routeStep = 0;
-            });
-        }
         return data;
     }
 
     return { VERSION, STORAGE_KEY, CONFIG, THEMES, ACHIEVEMENTS, MILESTONES, PRIZES, DEFAULT_SETTINGS,
         Game, createProfile, validateSave, boundsFor, capacity, createHabitat, currentAt, inkBlobs, rockDistance,
-        clamp, distance, normalize, fishScale, fishSpacing, swimRhythm, bubblePose, fishMouth, creaturePadding, prizePositions, createPrizeObstacles, electricRadius, deathPose, clone, createTerrain, terrainHeight };
+        clamp, distance, normalize, fishScale, fishSpacing, maleMark, swimRhythm, bubblePose, fishMouth, creaturePadding, prizePositions, createPrizeObstacles, electricRadius, deathPose, clone, createTerrain, terrainHeight };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = ZQ;

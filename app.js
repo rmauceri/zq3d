@@ -17,7 +17,7 @@ const ZQApp = (() => {
     let settings = { ...ZQ.DEFAULT_SETTINGS };
     let savedSession = null, game = null, demo = null, renderer = null;
     let selectedTheme = 'tropical', panelKind = '', journalTab = 'guide';
-    let lastSerialized = null, storageBlocked = false, storageConflict = false, saveFailure = '';
+    let lastSerialized = null, storageBlocked = false, storageConflict = false, saveFailure = '', freshSaveRequired = false;
     let raf = 0, lastTime = 0, renderTime = 0, visualTime = 0, lastDraw = 0;
     let autosaveTime = 0, hudTime = 0, toastTimer = 0;
     let installPrompt = null, registration = null, offlineReady = false, wakeLock = null;
@@ -27,7 +27,7 @@ const ZQApp = (() => {
     let encounterFeedback = null;
     let placement = null;
     let lastFeedTap = -Infinity, encounterHint = null;
-    const LIVE_TRAYS = new Set(['residents', 'journal', 'score', 'settings', 'prizes', 'menu', 'activity']);
+    const LIVE_TRAYS = new Set(['residents', 'journal', 'score', 'settings', 'prizes', 'menu', 'activity', 'volume']);
     const panelContent = () => $('catalog').open ? $('catalog-content') : $('tray').hidden ? $('panel-content') : $('tray-content');
     const sound = new ZQAudio.Soundscape();
     const motionMedia = matchMedia('(prefers-reduced-motion: reduce)');
@@ -41,14 +41,17 @@ const ZQApp = (() => {
         try {
             lastSerialized = localStorage.getItem(ZQ.STORAGE_KEY);
             if (!lastSerialized) return;
-            const saved = ZQ.validateSave(JSON.parse(lastSerialized));
+            const data = JSON.parse(lastSerialized);
+            freshSaveRequired = Number.isInteger(data?.version) && data.version !== ZQ.VERSION;
+            const saved = ZQ.validateSave(data);
             profile = saved.profile; settings = saved.settings;
             savedSession = saved.session && !saved.session.ended ? saved.session : null;
             if (savedSession) selectedTheme = savedSession.themeId;
         } catch (error) {
             storageBlocked = true;
             console.warn('zq3d: saved data was not loaded or overwritten.', error);
-            storageWarning(lastSerialized
+            storageWarning(freshSaveRequired ? 'This development update needs a fresh aquarium. Your old save is untouched. Open Settings and choose Start fresh aquarium to enable saving.'
+                : lastSerialized
                 ? 'Your saved aquarium could not be read. It has not been changed. See Settings to recover or reset only zq3d data.'
                 : 'Local saving is unavailable in this browser. You can still play, and export a backup from Settings before leaving.');
         }
@@ -150,7 +153,7 @@ const ZQApp = (() => {
     function suspendAudio() {
         sound.suspend().catch(error => {
             console.warn('zq3d: audio could not be suspended.', error);
-            toast('Audio was interrupted. Use Sound to restart it.', 'warning');
+            toast('Audio was interrupted. Use Volume to restart it.', 'warning');
         });
     }
     function syncAudio(fromGesture = false) {
@@ -174,7 +177,8 @@ const ZQApp = (() => {
             $('sound-button').setAttribute('aria-pressed', 'false');
             $('sound-button').setAttribute('aria-label', 'Enable sound');
             $('sound-button').innerHTML = icon('muted') + '<span class="wide-label">Sound off</span>';
-            toast('Sound could not start. Tap Sound again when your browser allows audio.', 'warning');
+            refresh();
+            toast('Sound could not start. Enable sound again when your browser allows audio.', 'warning');
         });
     }
     async function releaseWakeLock() {
@@ -209,8 +213,9 @@ const ZQApp = (() => {
         demo = new ZQ.Game(themeId, ZQ.createProfile(), { demo: true, width: renderer.width, height: renderer.height, seed: 71437 });
         renderer.reset();
         renderer.setTheme(theme, demo.state.bounds);
-        $('scene-location').textContent = theme.location;
+        $('scene-name').textContent = theme.name;
         $('scene-subtitle').textContent = theme.subtitle;
+        $('scene-description').textContent = theme.description;
         for (const button of $('theme-options').children) button.setAttribute('aria-pressed', String(button.dataset.theme === themeId));
         requestFrame();
         syncAudio(fromGesture);
@@ -219,7 +224,10 @@ const ZQApp = (() => {
         $('best-score').textContent = number(profile.highScore);
         $('achievement-count').innerHTML = `${Object.keys(profile.achievements).length} <small>/ 20</small>`;
         $('resume-button').hidden = !savedSession;
-        if (savedSession) $('resume-button').textContent = `Return to ${ZQ.THEMES[savedSession.themeId].name}`;
+        if (savedSession) {
+            $('resume-button').textContent = 'Resume aquarium';
+            $('resume-button').setAttribute('aria-label', `Resume ${ZQ.THEMES[savedSession.themeId].name}`);
+        }
     }
     function begin(resume = false) {
         if (storageConflict) { toast('Reload from Settings to use the aquarium saved by the other window.', 'warning'); return; }
@@ -242,7 +250,7 @@ const ZQApp = (() => {
         autosaveTime = 0;
         if (resume) game.resume();
         if (resume && game.state.milestone) showMilestone();
-        else if (!resume && profile.sessions === 0 && !profile.stats.food) toast('Drag to explore. Pinch or scroll to move closer. Menu holds everything else.');
+        else if (!resume && profile.sessions === 0 && !profile.stats.food) toast('Drag to explore. Pinch or scroll to zoom.');
         consumeEvents();
         save();
         refresh();
@@ -252,14 +260,13 @@ const ZQApp = (() => {
         renderer.canvas.focus({ preventScroll: true });
     }
     function requestBegin() {
+        if (storageConflict) { toast('Reload from Settings to use the aquarium saved by the other window.', 'warning'); return; }
         if (savedSession) {
-            confirmPanel('Begin a new aquarium?', 'Your existing session will be completed first. Your achievements and personal best stay with you.', 'Begin a new aquarium', () => {
-                const previous = new ZQ.Game(savedSession.themeId, profile, { snapshot: savedSession });
-                previous.finish();
-                savedSession = null;
-                begin(false);
-            });
-        } else begin(false);
+            const previous = new ZQ.Game(savedSession.themeId, profile, { snapshot: savedSession });
+            previous.finish();
+            savedSession = null;
+        }
+        begin(false);
     }
     function goHome() {
         clearPointers();
@@ -418,11 +425,24 @@ const ZQApp = (() => {
             } else if (['decoy', 'defended', 'flash', 'challenge'].includes(event.type)) {
                 encounterFeedback = null;
             }
-            if (!event.creature && (event.rejected || event.type === 'defended' || event.type === 'loss' || event.type === 'attack' && !game.state.creature) &&
+            if (!event.creature && (event.rejected || event.type === 'birth' || event.type === 'defended' || event.type === 'loss' || event.type === 'attack' && !game.state.creature) &&
                 (!mostImportant || (priority[event.type] || 1) >= (priority[mostImportant.type] || 1))) mostImportant = event;
         }
         if (mostImportant) toast(mostImportant.message, mostImportant.type, mostImportant.amount ?? null);
-        if (events.some(e => ['achievement', 'milestone', 'end', 'loss', 'birth', 'prize', 'defended'].includes(e.type))) save();
+        if (events.some(e => ['achievement', 'milestone', 'end', 'loss', 'birth', 'prize', 'defended', 'dispute', 'separated'].includes(e.type))) save();
+    }
+    function updateSocialHint() {
+        const node = $('social-hint'), pair = game?.state.disputes[0];
+        node.hidden = !pair || game.state.paused || game.state.ended;
+        if (node.hidden) return;
+        const fish = pair.ids.map(id => game.state.fish.find(f => f.id === id));
+        const p = renderer.project(fish[0].pos.map((n, i) => (n + fish[1].pos[i]) / 2));
+        const direction = p.x < 0 ? 'left' : p.x > renderer.width ? 'right' : p.y < 0 ? 'above' : p.y > renderer.height ? 'below' : 'turn camera';
+        const message = pair.phase === 'fight' ? 'Bettas fighting' : 'Rival males displaying';
+        setText('social-hint', `${p.visible ? '' : `Outside view (${direction}): `}${message}. Tap near them or press K to separate.`);
+        node.dataset.ready = String(pair.phase === 'fight');
+        node.style.left = `${ZQ.clamp(p.x, Math.min(145, renderer.width / 2), Math.max(renderer.width / 2, renderer.width - 145))}px`;
+        node.style.top = `${ZQ.clamp(p.y - 70, 80, Math.max(80, renderer.height - 160))}px`;
     }
     function updateEncounterHint() {
         const node = $('encounter-hint'), c = game?.state.creature;
@@ -470,6 +490,11 @@ const ZQApp = (() => {
     }
     function refresh() {
         if (!game) { updateWelcome(); return; }
+        if (!$('tray').hidden && $('tray').dataset.anchor === 'health') {
+            const health = document.querySelector('.game-hud').getBoundingClientRect();
+            $('tray').style.setProperty('--health-tray-top', `${health.bottom + 8}px`);
+            $('tray').style.setProperty('--health-tray-left', `${health.left}px`);
+        }
         const s = game.state;
         const actionable = !s.paused && !s.ended && !storageConflict;
         setText('score', number(s.score));
@@ -483,6 +508,17 @@ const ZQApp = (() => {
         $('feed-button').disabled = !actionable || s.score < ZQ.CONFIG.feedCost;
         $('clean-button').disabled = !actionable || s.score < ZQ.CONFIG.cleanCost;
         $('shop-button').disabled = !actionable;
+        $('zen-button').disabled = !actionable;
+        $('zen-button').setAttribute('aria-pressed', String(s.auto));
+        $('pause-button').disabled = s.ended || storageConflict || renderer.lost;
+        $('pause-button').setAttribute('aria-label', s.paused ? 'Resume aquarium' : 'Pause aquarium');
+        $('pause-button').querySelector('use').setAttribute('href', `#i-${s.paused ? 'play' : 'pause'}`);
+        $('pause-button').querySelector('span').textContent = s.paused ? 'Resume' : 'Pause';
+        $('volume-button').querySelector('use').setAttribute('href', `#i-${settings.sound && settings.volume > 0 ? 'sound' : 'muted'}`);
+        if (panelKind === 'volume' && $('volume-mute')) {
+            $('volume-mute').textContent = settings.sound ? 'Mute' : 'Sound on';
+            $('volume-mute').setAttribute('aria-pressed', String(settings.sound));
+        }
         $('pause-card').hidden = !s.paused || s.ended || $('panel').open;
         $('milestone-notice').hidden = !s.milestone || s.ended;
         $('unpause-button').disabled = storageConflict || renderer.lost;
@@ -506,6 +542,7 @@ const ZQApp = (() => {
         setText('care-action', action);
         $('care-action').dataset.action = target;
         updateEncounterHint();
+        updateSocialHint();
         updatePlacement();
         if (panelKind === 'shop' && $('catalog').open) updateShopButtons();
         if (panelKind === 'residents' && !$('tray').hidden) updateResidents();
@@ -516,14 +553,26 @@ const ZQApp = (() => {
         if (panelKind === 'activity' && !$('tray').hidden) updateActivity();
     }
 
-    function openPanel(kind, title, eyebrow, html) {
+    function dismissInfoToast() {
+        if ($('toast').dataset.kind !== 'info') return;
+        clearTimeout(toastTimer);
+        $('toast').hidden = true;
+    }
+    function openPanel(kind, title, eyebrow, html, anchor) {
+        dismissInfoToast();
         clearPointers();
         if ($('catalog').open) $('catalog').close();
         panelKind = kind;
         if (LIVE_TRAYS.has(kind)) {
             if ($('panel').open) $('panel').close();
             $('panel-content').replaceChildren();
-            if ($('tray').hidden) trayTrigger = document.activeElement;
+            if ($('tray').hidden) {
+                trayTrigger = document.activeElement;
+                $('tray').dataset.anchor = anchor || 'menu';
+            } else if (anchor) {
+                $('tray').dataset.anchor = anchor;
+                trayTrigger = anchor === 'health' ? $('score-button') : $('menu-button');
+            }
             $('tray-title').textContent = title;
             $('tray-eyebrow').textContent = eyebrow;
             $('tray-content').innerHTML = html;
@@ -532,6 +581,7 @@ const ZQApp = (() => {
             $('menu-button').setAttribute('aria-expanded', String(kind === 'menu'));
             document.body.classList.add('tray-open');
             $('tray-content').scrollTop = 0;
+            $('tray').focus({ preventScroll: true });
             requestFrame();
         } else {
             $('tray').hidden = true;
@@ -541,7 +591,6 @@ const ZQApp = (() => {
             $('panel-title').textContent = title;
             $('panel-eyebrow').textContent = eyebrow;
             $('panel-content').innerHTML = html;
-            $('panel-close').hidden = false;
             if (!$('panel').open) $('panel').showModal();
             stopAnimation();
             suspendAudio();
@@ -549,6 +598,8 @@ const ZQApp = (() => {
             $('panel').scrollTop = 0;
         }
         if (game) save();
+        $('shop-button').setAttribute('aria-expanded', String($('catalog').open));
+        $('volume-button').setAttribute('aria-expanded', String(kind === 'volume'));
         refresh();
     }
     function closePanel() {
@@ -562,6 +613,8 @@ const ZQApp = (() => {
             if (trayTrigger?.isConnected) trayTrigger.focus({ preventScroll: true });
         }
         panelKind = '';
+        $('shop-button').setAttribute('aria-expanded', 'false');
+        $('volume-button').setAttribute('aria-expanded', 'false');
     }
     function toggleAutoCare() {
         act(() => {
@@ -570,43 +623,56 @@ const ZQApp = (() => {
             game.emit('care-mode', game.state.auto ? 'Zen care is tending the essentials.' : 'The little world is in your hands.');
         });
     }
+    function toggleControls() {
+        dismissInfoToast();
+        const hidden = !$('command-bar').hidden;
+        clearPointers();
+        closePanel();
+        $('command-bar').hidden = hidden;
+        document.body.classList.toggle('controls-hidden', hidden);
+        $('controls-toggle').setAttribute('aria-expanded', String(!hidden));
+        $('controls-toggle').setAttribute('aria-label', hidden ? 'Show command bar' : 'Hide command bar');
+    }
+    function showVolume() {
+        if (panelKind === 'volume' && !$('tray').hidden) { closePanel(); return; }
+        openPanel('volume', 'Volume', '',
+            `<div class="volume-controls"><button class="small-button" id="volume-mute" aria-pressed="${settings.sound}">${settings.sound ? 'Mute' : 'Sound on'}</button>
+            <input id="dock-volume" aria-label="Volume" type="range" min="0" max="100" step="1" value="${Math.round(settings.volume * 100)}"></div>`);
+        $('volume-mute').addEventListener('click', () => {
+            settings.sound = !settings.sound;
+            $('volume-mute').textContent = settings.sound ? 'Mute' : 'Sound on';
+            $('volume-mute').setAttribute('aria-pressed', String(settings.sound));
+            save(); syncAudio(true); refresh();
+        });
+        $('dock-volume').addEventListener('input', event => {
+            settings.volume = Number(event.target.value) / 100;
+            sound.setVolume(settings.volume); save(); refresh();
+        });
+    }
     function showMenu() {
         if (!game) return;
         const item = (action, symbol, label) => `<button class="menu-item" data-menu-action="${action}">${icon(symbol)}<span>${label}</span></button>`;
-        openPanel('menu', 'A moment, your way.', game.theme.name,
+        openPanel('menu', 'Menu', game.theme.name,
             `<div class="aquarium-menu">
             ${item('residents', 'fish', 'Residents & following')}${item('score', 'award', 'Status & progress')}
             ${item('prizes', 'chest', 'Tank prizes')}${item('activity', 'book', 'Recent moments')}
-            ${item('journal', 'book', 'Field guide')}${item('auto', 'leaf', '<span id="menu-auto-label">Zen care</span>')}
-            ${item('sound', 'sound', '<span id="menu-sound-label">Sound</span>')}${item('settings', 'settings', 'Settings')}
-            ${item('pause', 'pause', '<span id="menu-pause-label">Pause</span>')}${item('immerse', 'expand', 'Immerse')}
+            ${item('journal', 'book', 'Field guide')}${item('settings', 'settings', 'Settings')}
+            ${item('immerse', 'expand', 'Immerse')}
             </div>
-            <h3>Explore the water</h3><p>Drag empty water to orbit; pinch or scroll to zoom. Press a creature and drag outward to fend it off. Hold a coiling eel to discharge it.</p>
             <div class="menu-camera" role="group" aria-label="Camera controls">
             ${item('orbit', 'orbit', 'Orbit')}${item('view', 'eye', 'Angle')}
             ${item('zoom-in', 'zoom-in', 'Closer')}${item('zoom-out', 'zoom-out', 'Back')}
             ${item('reset', 'reset', 'Reset')}${item('unfollow', 'fish', 'Stop following')}
-            </div>${item('home', 'home', 'Save & return home')}`);
+            </div>${item('home', 'home', 'Save & return home')}`, 'menu');
         updateMenu();
     }
     function updateMenu() {
-        const s = game.state;
-        $('menu-auto-label').textContent = `Zen care \u00b7 ${s.auto ? 'On' : 'Off'}`;
-        const auto = panelContent().querySelector('[data-menu-action="auto"]');
-        auto.setAttribute('aria-pressed', String(s.auto));
-        auto.disabled = !game.actionable();
-        $('menu-sound-label').textContent = settings.sound ? 'Sound on' : 'Sound off';
-        panelContent().querySelector('[data-menu-action="sound"]').setAttribute('aria-pressed', String(settings.sound));
-        $('menu-pause-label').textContent = s.paused ? 'Resume aquarium' : 'Pause aquarium';
-        panelContent().querySelector('[data-menu-action="pause"]').disabled = s.ended || storageConflict;
         panelContent().querySelector('[data-menu-action="unfollow"]').hidden = !renderer.camera.follow;
     }
     function menuAction(action) {
         const actions = {
             residents: showResidents, score: showScore, prizes: showPrizes, journal: () => showJournal(),
-            settings: showSettings, activity: showActivity, auto: toggleAutoCare,
-            sound: () => { settings.sound = !settings.sound; save(); syncAudio(true); refresh(); },
-            pause: () => { closePanel(); game.state.paused ? resume() : pause(); },
+            settings: showSettings, activity: showActivity,
             immerse: () => immerse(true), home: goHome,
             orbit: () => renderer.orbit(Math.PI / 8, 0),
             view: () => {
@@ -641,44 +707,42 @@ const ZQApp = (() => {
         $('cancel-action').focus();
     }
     function showShop() {
+        if ($('catalog').open) { closePanel(); return; }
         if (!game || !game.actionable()) return;
+        dismissInfoToast();
         cancelPlacement(); clearPointers(); closePanel();
         trayTrigger = document.activeElement; panelKind = 'shop';
         $('catalog-content').innerHTML =
-            `<p>Choose a resident by its silhouette and personality. Tap outside or press Esc to return to the water.</p>
-            <p id="shop-budget"></p>${game.theme.fish.map((f, i) => `
-            <div class="shop-row catalog-row"><div class="species-preview">${ZQRenderer.fishPreview(f)}</div><div class="species-info">
-            <h3>${f.name}</h3><p>${f.traits.map(t => t[0].toUpperCase() + t.slice(1)).join(' &amp; ')}</p><small data-species-count="${i}">${f.cost} points &middot; ${game.state.fish.filter(fish => fish.type === i).length} in your aquarium</small>
-            </div><button class="small-button" data-buy="${i}" aria-label="Add ${f.name} for ${f.cost} points">Add &middot; ${f.cost}</button></div>`).join('')}
-            <div class="note-box">School three of the same species, or collect all four. Hungry large fish may hunt smaller neighbors. Feed them before they struggle.</div>`;
+            `<div class="catalog-list">${game.theme.fish.map((f, i) => `
+            <button class="catalog-fish" data-buy="${i}" aria-label="Add ${f.name} for ${f.cost} points" title="${safeText(f.traits.join(' & '))}">
+            <span class="species-preview">${ZQRenderer.fishPreview(f)}</span><span class="catalog-name">${f.name}</span>
+            <span class="catalog-cost">${f.cost}<small>pts</small></span></button>`).join('')}</div>`;
         $('catalog').show();
         panelContent().querySelectorAll('[data-buy]').forEach(button => button.addEventListener('click', () => {
             game.buy(Number(button.dataset.buy));
             consumeEvents(); save(); refresh();
             requestFrame();
         }));
-        $('catalog-close').focus({ preventScroll: true });
         updateShopButtons();
+        $('shop-button').setAttribute('aria-expanded', 'true');
+        ($('catalog-content').querySelector('[data-buy]:not(:disabled)') || $('catalog')).focus({ preventScroll: true });
         requestFrame();
     }
     function updateShopButtons() {
-        if (!$('shop-budget') || !game) return;
-        $('shop-budget').textContent = `${number(game.state.score)} points available \u00b7 ${game.state.fish.length} of ${game.state.maxFish} residents`;
+        if (!$('catalog').open || !game) return;
         panelContent().querySelectorAll('[data-buy]').forEach(button => {
             button.disabled = !game.actionable() || game.state.score < game.theme.fish[Number(button.dataset.buy)].cost || game.state.fish.length >= game.state.maxFish;
         });
-        panelContent().querySelectorAll('[data-species-count]').forEach(label => {
-            const type = Number(label.dataset.speciesCount);
-            label.textContent = `${game.theme.fish[type].cost} points \u00b7 ${game.state.fish.filter(f => f.type === type).length} in your aquarium`;
-        });
     }
     function residentActivity(f) {
+        const social = { court: 'Courting', display: 'Territorial display', fight: 'Fighting' };
+        if (social[f.activity]) return social[f.activity];
         const labels = { explore: 'Exploring formations', browse: 'Browsing plant edges', channel: 'Following the channel' };
         return f.activity === f.intent && labels[f.habitatActivity] || f.activity;
     }
     function residentRow(f) {
         const def = game.theme.fish[f.type];
-        return `<div class="shop-row" data-resident="${f.id}"><div class="species-mark">${icon('fish')}</div><div class="species-info"><h3 data-resident-name>${def.name}${f.growth < 1 ? ' \u00b7 Baby' : ''}</h3>
+        return `<div class="shop-row" data-resident="${f.id}"><div class="species-mark">${icon('fish')}</div><div class="species-info"><h3 data-resident-name>${def.name} \u00b7 ${f.sex === 'male' ? 'Male' : 'Female'}${f.growth < 1 ? ' \u00b7 Baby' : ''}</h3>
             <p data-resident-traits>${def.traits.join(' &amp; ')} \u00b7 ${safeText(residentActivity(f))}</p>
             <div class="resident-meters"><span><span data-health-label>Health ${Math.ceil(f.health)}%</span><span class="meter" data-health-meter><span style="width:${f.health}%"></span></span></span>
             <span><span data-hunger-label>Fullness ${Math.ceil(f.hunger)}%</span><span class="meter" data-hunger-meter><span style="width:${f.hunger}%"></span></span></span></div></div>
@@ -688,7 +752,8 @@ const ZQApp = (() => {
         if (!game) return;
         const residents = game.state.fish;
         openPanel('residents', 'Meet your residents.', game.theme.name,
-            `<p>A closer look, whenever you want it. Follow lets the camera drift alongside a fish; ordinary taps on the aquarium simply tap the glass.</p>
+            `<p>Males have contrasting fin colors, broad bright flank ribbons, or bolder natural spots and patches. Follow drifts alongside a fish.</p>
+            <p id="breeding-summary"></p>
             <div id="resident-list">${residents.map(residentRow).join('')}</div>
             <p id="resident-empty" ${residents.length ? 'hidden' : ''}>Your aquarium is empty. Add a fish to bring it back to life.</p>`);
         $('resident-list').addEventListener('click', event => {
@@ -707,12 +772,20 @@ const ZQApp = (() => {
             if (!list.querySelector(`[data-resident="${f.id}"]`)) list.insertAdjacentHTML('beforeend', residentRow(f));
         }
         $('resident-empty').hidden = game.state.fish.length > 0;
+        setText('breeding-summary', game.theme.fish.map((def, type) => {
+            const adults = game.state.fish.filter(f => f.type === type && f.growth === 1);
+            if (!adults.length) return '';
+            const males = adults.filter(f => f.sex === 'male').length, females = adults.length - males;
+            const ready = adults.some(f => f.sex === 'male' && game.breedingFish(f)) &&
+                adults.some(f => f.sex === 'female' && game.breedingFish(f));
+            return `${def.name}: ${males} male / ${females} female${ready ? ' (breeding pair)' : ''}`;
+        }).filter(Boolean).join(' \u00b7 '));
         list.querySelectorAll('[data-resident]').forEach(row => {
             const f = game.state.fish.find(f => f.id === Number(row.dataset.resident));
             row.querySelector('[data-follow]').disabled = !f;
             if (f) {
                 const def = game.theme.fish[f.type];
-                row.querySelector('[data-resident-name]').textContent = def.name + (f.growth < 1 ? ' \u00b7 Baby' : '');
+                row.querySelector('[data-resident-name]').textContent = `${def.name} \u00b7 ${f.sex === 'male' ? 'Male' : 'Female'}` + (f.growth < 1 ? ' \u00b7 Baby' : '');
                 row.querySelector('[data-resident-traits]').textContent = def.traits.join(' & ') + ` \u00b7 ${residentActivity(f)}${f.schooling ? ' \u00b7 Schooling' : ''}`;
             }
             row.querySelector('[data-health-label]').textContent = f ? `Health ${Math.ceil(f.health)}%` : 'This fish was lost.';
@@ -782,7 +855,9 @@ const ZQApp = (() => {
                 ${icon('fish')}<div><h3>Defend their little world.</h3><p>Creatures persist until you fend them off. Help appears near the dock on entry and each attack warning, then fades. Press on a jellyfish, squid, or octopus, drag outward, then release; three swipes send it away. Octopus and squid ink, dropped jellyfish spines, and an eel's electric field kill any fish crossing them. Crabs grab fish with their claws and can jump off the floor. A lost fish rolls upside down, floats up, then dissolves. A message confirms successful defense.</p></div>
                 ${icon('chest')}<div><h3>Claws and currents.</h3><p>Bright crabs steal fallen food and snap at nearby fish. Press the crab and swipe left, right, then left (or right, left, right). Eels coil before releasing an electric pulse and lunging. Press and hold on a coiling eel until its discharge cue. A short tap is not enough. With a keyboard: X swipes ordinary creatures, J/L alternate crab swipes, and holding H discharges a coiling eel. Defense gestures never count as stressful glass taps. Everything freezes when paused.</p></div>
                 ${icon('oyster')}<div><h3>Care leaves its treasures.</h3><p>Reach 1,000 points for a Bubble Chest. Welcome a baby for a Pearl Oyster. Repel an eel for a Watchlight Lantern; outwit a crab for a Tidekeeper Arch. Earn them anew each round, place three at a time, and tap them to bring them to life.</p></div>
-                ${icon('leaf')}<div><h3>Let the aquarium breathe.</h3><p>Full fish have at least fifty seconds before seeking food; manual portions grow with the hungry population. Healthy adult pairs reproduce more readily in sparse tanks, starting after a 35-to-65-second respite. Births slow as the tank fills. Zen care automatically feeds, cleans, and maintains a small population when you can afford it. The same rules still apply: it is assistance, not invulnerability.</p></div>
+                ${icon('leaf')}<div><h3>Let the aquarium breathe.</h3><p>Each fish is randomly male or female, including babies. Males have contrasting fin colors, broad bright flank ribbons, or bolder natural spots and patches; each species keeps its recognizable pattern. Residents shows sex and adult pair counts. Adult parents need fullness above 60%, health above 70%, and water above 50%. They approach and circle before a birth; threats, poor water, or a full tank interrupt courtship. Babies must grow up before breeding. Sparse tanks breed more readily, after a shared 25-to-45-second respite that lengthens as the tank fills. A brief announcement welcomes each baby.</p></div>
+                ${icon('fish')}<div><h3>Give rivals space.</h3><p>Two adult male Brushstroke Bettas may display when they meet, then fight after four seconds. Tap the glass near either rival, or press K even if they are outside your view. This protective tap separates them without stress or waking visitors. Eight more seconds of fighting costs a fish its life. Separated rivals retreat and settle for ninety seconds. Zen care separates them automatically; pause freezes courtship and disputes.</p></div>
+                ${icon('leaf')}<div><h3>A gentle helping hand.</h3><p>Full fish have at least fifty seconds before seeking food; portions grow with the hungry population. Zen care automatically feeds, cleans, maintains a small population, and separates territorial rivals. Care still costs points; it is assistance, not invulnerability.</p></div>
                 ${icon('orbit')}<div><h3>A whole new point of view.</h3><p>Drag empty water to orbit. Pinch or scroll to zoom. Outside food aiming, tap the glass, fish, or creature for a reaction; G is the keyboard equivalent. Glass taps stir resting visitors without defending them or skipping their warning. Repeated tapping causes stress. Creature gestures defend; tap prizes to enjoy them or drag them along open sand. Each new round earns its own prizes; saved rounds retain placements.</p></div>
                 ${icon('wave')}<div><h3>A habitat, not a backdrop.</h3><p>Residents browse plant edges, explore formations, rest near shelter, and follow the lower channel in loose schools. Smaller fish can use openings that larger bodies cannot fit through. Crabs follow the sand banks and food settles on their slopes. Place prizes on level sand. Your aquarium keeps its shape when the screen rotates; the camera reframes instead.</p></div>
             </div>
@@ -805,7 +880,7 @@ const ZQApp = (() => {
             card.querySelector('small').textContent = date ? `Discovered ${date}` : 'Still to discover';
         });
     }
-    function showScore() {
+    function showScore(anchor) {
         if (!game) return;
         openPanel('score', 'A healthy rhythm.', 'YOUR SCORE, EXPLAINED',
             `<div class="session-stats"><div><strong id="detail-score"></strong><small>POINTS</small></div><div><strong id="detail-multiplier"></strong><small>MULTIPLIER</small></div><div><strong id="detail-rate"></strong><small>POINTS / SECOND</small></div></div>
@@ -816,7 +891,7 @@ const ZQApp = (() => {
             <p id="detail-streak"></p>
             <div class="note-box">30 seconds: \u00d71.5 &nbsp; / &nbsp; 90 seconds: \u00d72 &nbsp; / &nbsp; 180 seconds: \u00d73<br>All fish must be above 80% to build the streak. Below 50% resets your multiplier.</div>
             <h3>Care pays off</h3><p>Perfect Tank: +25 every 60 seconds with five fish above 90% health. Biodiversity: +15 every 45 seconds with all four species. Baby Born: +10. Clean Sweep: +20 when water is above 70% before cleaning.</p>
-            <h3>Every resident matters</h3><p>Fish lost: \u221215; starvation: \u221220. Repeated glass tapping: \u22125 and water damage. Neglected water: \u221210 every 30 seconds below 25%. Scores never go below zero.</p>`);
+            <h3>Every resident matters</h3><p>Fish lost: \u221215; starvation: \u221220. Repeated glass tapping: \u22125 and water damage. Neglected water: \u221210 every 30 seconds below 25%. Scores never go below zero.</p>`, anchor);
     }
     function updateScore() {
         const s = game.state, earning = s.fish.filter(f => f.health > 50 && f.growth === 1).length;
@@ -880,12 +955,12 @@ const ZQApp = (() => {
             ${saveFailure ? `<div class="note-box error-text">${safeText(saveFailure)}</div>` : ''}
             <div class="panel-actions"><button class="secondary-button" id="export-button">Export backup</button><button class="secondary-button" id="import-button">Restore backup</button>
             ${storageConflict ? '<button class="primary-button" id="reload-button">Reload latest save</button>' : ''}
-            ${storageBlocked && lastSerialized ? '<button class="secondary-button" id="reset-save-button">Reset unreadable zq3d save</button>' : ''}</div>
+            ${storageBlocked && lastSerialized ? `<button class="secondary-button" id="reset-save-button">${freshSaveRequired ? 'Start fresh aquarium' : 'Reset unreadable zq3d save'}</button>` : ''}</div>
             <input id="import-file" type="file" accept=".json,application/json" hidden>
             ${game && !game.state.ended ? '<div class="panel-actions"><button class="secondary-button" id="save-home-button">Save &amp; return home</button><button class="secondary-button" id="end-session-button">Finish this session</button></div>' : ''}
             <p style="margin-top:24px">zq3d &middot; A parallel Zenquarium experience<br>Created with care. No accounts, telemetry, or external services.</p>`);
-        $('setting-sound').addEventListener('change', event => { settings.sound = event.target.checked; save(); syncAudio(true); });
-        $('setting-volume').addEventListener('input', event => { settings.volume = Number(event.target.value) / 100; sound.setVolume(settings.volume); save(); });
+        $('setting-sound').addEventListener('change', event => { settings.sound = event.target.checked; save(); syncAudio(true); refresh(); });
+        $('setting-volume').addEventListener('input', event => { settings.volume = Number(event.target.value) / 100; sound.setVolume(settings.volume); save(); refresh(); });
         $('setting-quality').addEventListener('change', event => {
             settings.quality = event.target.value; renderer.setQuality(settings.quality); save(); requestFrame();
         });
@@ -895,7 +970,7 @@ const ZQApp = (() => {
         $('import-button').addEventListener('click', () => $('import-file').click());
         $('import-file').addEventListener('change', event => restoreSave(event.target.files[0]));
         $('reload-button')?.addEventListener('click', () => location.reload());
-        $('reset-save-button')?.addEventListener('click', () => confirmPanel('Reset the unreadable save?', 'This removes only zq3d data. Export the unreadable backup first if you want to keep it.', 'Reset zq3d', () => {
+        $('reset-save-button')?.addEventListener('click', () => confirmPanel(freshSaveRequired ? 'Start fresh for this development update?' : 'Reset the unreadable save?', 'This removes only zq3d data, including this device\'s previous aquarium and discoveries. Export a backup first if you want to keep it.', 'Reset zq3d', () => {
             try { localStorage.removeItem(ZQ.STORAGE_KEY); location.reload(); }
             catch (error) { console.error('zq3d: save reset failed.', error); storageWarning('This browser did not allow the saved data to be removed.'); }
         }));
@@ -958,6 +1033,7 @@ const ZQApp = (() => {
             renderer.render(scene.state, renderTime, dt);
             positionPlacementMarker();
             updateEncounterHint();
+            updateSocialHint();
             lastDraw = now;
         }
         if (canAnimate()) {
@@ -982,6 +1058,19 @@ const ZQApp = (() => {
         $('viewport').classList.remove('feeding');
         if (game) { game.cursor = null; game.endCreatureHold(); }
     }
+    function disputeAt(x, y) {
+        if (!game?.actionable() || placement) return null;
+        for (const pair of game.state.disputes) {
+            const fish = pair.ids.map(id => game.state.fish.find(f => f.id === id));
+            const points = [...fish.map(f => ({ pos: f.pos, fish: f })),
+                { pos: fish[0].pos.map((n, i) => (n + fish[1].pos[i]) / 2), fish: fish[0] }];
+            for (const point of points) {
+                const p = renderer.project(point.pos);
+                if (p.visible && Math.hypot(p.x - x, p.y - y) <= Math.max(32, p.scale * ZQ.fishScale(point.fish))) return point.fish;
+            }
+        }
+        return null;
+    }
     function pointerDown(event) {
         if (event.button !== 0 && event.pointerType === 'mouse' || $('panel').open) return;
         const rect = $('viewport').getBoundingClientRect();
@@ -989,10 +1078,11 @@ const ZQApp = (() => {
         pointers.set(event.pointerId, point);
         $('viewport').setPointerCapture(event.pointerId);
         if (pointers.size === 1) {
-            const hit = game?.actionable() && !placement ? renderer.pick(game.state, point.x, point.y) : null;
+            const social = disputeAt(point.x, point.y);
+            const hit = !social && game?.actionable() && !placement ? renderer.pick(game.state, point.x, point.y) : null;
             const creature = hit?.kind === 'creature' && !hit.entity.defended ? hit.entity : null;
             const center = creature ? renderer.project(creature.pos) : null;
-            gesture = { x: point.x, y: point.y, time: performance.now(), moved: false, multi: false, creature, center,
+            gesture = { x: point.x, y: point.y, time: performance.now(), moved: false, multi: false, creature, center, social,
                 placing: Boolean(placement), prize: hit?.kind === 'prize' ? hit.entity : null,
                 threshold: center ? ZQ.clamp(center.scale * game.theme.visitors[creature.index].size * 0.33, 24, 64) : 24 };
             if (gesture.prize) {
@@ -1060,7 +1150,9 @@ const ZQApp = (() => {
             const c = gesture.creature;
             game.endCreatureHold();
             if (!c.defended && !gesture.moved && performance.now() - gesture.time < PARAMS.tapDuration) {
-                act(() => game.tapCreature());
+                const social = disputeAt(point.x, point.y);
+                if (social) act(() => game.tap([...social.pos]));
+                else act(() => game.tapCreature());
             } else if (c.kind !== 'eel' && !c.defended) {
                 const dx = point.x - gesture.x, dy = point.y - gesture.y;
                 const length = Math.hypot(dx, dy);
@@ -1073,10 +1165,12 @@ const ZQApp = (() => {
                     : 'Press the creature and drag outward, then release.'));
             }
         } else if (!pointers.size && point && gesture && !gesture.creature && !gesture.moved && !gesture.multi && performance.now() - gesture.time < PARAMS.tapDuration && game && !game.state.paused) {
+            const social = disputeAt(point.x, point.y);
             const hit = renderer.pick(game.state, point.x, point.y);
-            if (hit?.kind === 'creature') act(() => game.tapCreature());
-            else if (hit?.kind === 'prize') act(() => game.interactPrize(hit.entity.id));
-            else act(() => game.tap(hit?.kind === 'fish' ? [...hit.entity.pos]
+            if (social) act(() => game.tap([...social.pos]));
+            else if (!gesture.social && hit?.kind === 'creature') act(() => game.tapCreature());
+            else if (!gesture.social && hit?.kind === 'prize') act(() => game.interactPrize(hit.entity.id));
+            else if (!gesture.social) act(() => game.tap(hit?.kind === 'fish' ? [...hit.entity.pos]
                 : game.constrain(renderer.worldPoint(point.x, point.y))));
         }
         if (!pointers.size) { gesture = null; pinchDistance = 0; }
@@ -1117,6 +1211,10 @@ const ZQApp = (() => {
             f: feed, c: () => act(() => game.clean()), b: showShop, t: showPrizes,
             m: () => panelKind === 'menu' && !$('tray').hidden ? closePanel() : showMenu(),
             g: () => act(() => game.tap(game.constrain(renderer.worldPoint(renderer.width / 2, renderer.height / 2)))),
+            k: () => {
+                const pair = game.state.disputes[0], fish = pair && game.state.fish.find(f => f.id === pair.ids[0]);
+                if (fish) act(() => game.tap([...fish.pos]));
+            },
             x: () => act(() => game.defendCreature('swipe')),
             j: () => act(() => game.defendCreature('swipe', -1)),
             l: () => act(() => game.defendCreature('swipe', 1)),
@@ -1195,10 +1293,14 @@ const ZQApp = (() => {
         $('feed-button').addEventListener('click', feed);
         $('clean-button').addEventListener('click', () => act(() => game.clean()));
         $('shop-button').addEventListener('click', showShop);
+        $('zen-button').addEventListener('click', toggleAutoCare);
+        $('pause-button').addEventListener('click', () => { closePanel(); game.state.paused ? resume() : pause(); });
+        $('volume-button').addEventListener('click', showVolume);
+        $('controls-toggle').addEventListener('click', toggleControls);
         $('menu-button').addEventListener('click', () => panelKind === 'menu' && !$('tray').hidden ? closePanel() : showMenu());
         $('unpause-button').addEventListener('click', resume);
         $('pause-home-button').addEventListener('click', goHome);
-        $('score-button').addEventListener('click', showScore);
+        $('score-button').addEventListener('click', () => showScore('health'));
         $('exit-immersion').addEventListener('click', () => immerse(false));
         $('care-action').addEventListener('click', event => {
             const action = event.currentTarget.dataset.action;
@@ -1210,10 +1312,8 @@ const ZQApp = (() => {
             const button = event.target.closest('[data-menu-action]');
             if (button && !button.disabled) menuAction(button.dataset.menuAction);
         });
-        $('tray-close').addEventListener('click', closePanel);
         $('placement-confirm').addEventListener('click', commitPlacement);
         $('placement-cancel').addEventListener('click', clearPointers);
-        $('catalog-close').addEventListener('click', closePanel);
         $('milestone-continue').addEventListener('click', () => act(() => game.continueMilestone()));
         $('milestone-end').addEventListener('click', () => {
             if (game?.state.milestone) {
@@ -1224,6 +1324,7 @@ const ZQApp = (() => {
         $('catalog').addEventListener('close', () => {
             $('catalog-content').replaceChildren();
             if (panelKind === 'shop') panelKind = '';
+            $('shop-button').setAttribute('aria-expanded', 'false');
             if (trayTrigger?.isConnected) trayTrigger.focus({ preventScroll: true });
         });
         document.addEventListener('pointerdown', event => {
@@ -1236,16 +1337,16 @@ const ZQApp = (() => {
                 }
                 return;
             }
-            if ($('catalog').open && !$('catalog').contains(event.target)) {
+            if ($('catalog').open && !$('catalog').contains(event.target) &&
+                !event.target.closest('.command-controls, .aquarium-menu-button, .game-hud, #milestone-notice, #care-alert')) {
                 closePanel();
                 event.preventDefault(); event.stopPropagation();
             } else if (!$('tray').hidden && !$('tray').contains(event.target) &&
-                !event.target.closest('.dock, .game-hud, #milestone-notice, #care-alert')) {
+                !event.target.closest('.command-controls, .aquarium-menu-button, .game-hud, #milestone-notice, #care-alert')) {
                 closePanel();
                 event.preventDefault(); event.stopPropagation();
             }
         }, true);
-        $('panel-close').addEventListener('click', () => panelKind === 'summary' ? goHome() : closePanel());
         $('panel').addEventListener('cancel', event => {
             event.preventDefault();
             panelKind === 'summary' ? goHome() : closePanel();
@@ -1303,23 +1404,19 @@ const ZQApp = (() => {
         load();
         renderer = new ZQRenderer.Renderer($('viewport'), {
             fallback: message => {
-                $('renderer-label').textContent = 'PERSPECTIVE MODE';
                 toast(`${message} A lighter perspective mode keeps your aquarium playable.`);
             },
             lost: () => pause('3D graphics were interrupted. Your aquarium is safely paused while the browser restores them.'),
             restored: () => {
                 refresh(); requestFrame();
                 toast('Graphics restored. Resume when you are ready.');
-            },
-            quality: level => {
-                $('renderer-label').textContent = renderer.is3D ? `3D \u00b7 ${level.toUpperCase()}` : 'PERSPECTIVE MODE';
             }
         });
         renderer.setQuality(settings.quality);
         applyMotion();
-        $('theme-options').innerHTML = Object.values(ZQ.THEMES).map((theme, i) =>
+        $('theme-options').innerHTML = Object.values(ZQ.THEMES).map(theme =>
             `<button class="theme-option" data-theme="${theme.id}" aria-pressed="${theme.id === selectedTheme}" aria-label="Preview ${theme.name}: ${theme.subtitle}">
-            <span class="theme-number">0${i + 1}${icon('arrow')}</span><strong>${theme.name}</strong></button>`).join('');
+            <strong>${theme.name}</strong></button>`).join('');
         $('theme-options').querySelectorAll('[data-theme]').forEach(button => button.addEventListener('click', () => preview(button.dataset.theme, true)));
         new ResizeObserver(() => {
             document.body.style.setProperty('--care-height', `${$('care-alert').getBoundingClientRect().height}px`);

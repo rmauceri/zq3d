@@ -46,7 +46,7 @@ in Settings and restore it in the destination browser or installed app.
 - **Actual WebGL geometry**, not flat images on CSS cards: deforming fish bodies
   and fins, species markings, curved tentacles, rocks, plants, a perspective camera,
   depth occlusion, moving caustics, underwater fog, light shafts, and bubbles.
-- **Five distinct worlds**: Koi Garden is a warm pond with surface lilies,
+- **Five distinct worlds**: Koi Pond is a warm pond with surface lilies,
   leaf shadows, river stones, and contrasting koi patches. Tropical Reef
   clusters branching, plate, boulder, and fan corals around pale sand lanes,
   with turquoise shallows fading into cobalt depth. Deep Ocean pairs dark
@@ -106,9 +106,30 @@ in Settings and restore it in the destination browser or installed app.
   cannot guarantee elimination of device/browser output underruns.
 - **Touch, mouse, and keyboard**: drag to orbit, scroll/pinch to zoom, inspect and
   follow a fish, or hide the interface without losing access to care warnings.
-- **A quiet interface**: one compact status control and a four-action dock:
-  Feed, Clean, Add fish, and Menu. Residents, progress, camera buttons, sound,
-  Zen care, prizes, settings, and the field guide live in one non-modal tray.
+- **A quiet interface**: one compact status control and a collapsible command
+  bar: Feed, Clean, Add fish, Pause/Resume, Zen care, and Volume.
+  A small chevron hides the bar without pausing the aquarium. Menu lives in the
+  upper right and opens a non-modal flyout for residents, progress, camera
+  buttons, prizes, settings, and the field guide. Menu's child panels stay
+  anchored beneath the same upper-right button. Health-widget panels and their
+  child screens stay beneath the upper-left health widget.
+  The preview identifies the selected world at its top with the theme name and
+  two short descriptive lines, retained on small screens instead of a renderer badge.
+  Phones and small tablets use a preview-first welcome screen with brief copy
+  and a single-line portrait title that leaves more room for the aquarium,
+  all five world choices visible without scrolling, and side-by-side preview/content in
+  landscape, with a narrow introduction pane and unnumbered world choices.
+  Enter aquarium starts the selected world directly; Resume keeps the saved
+  aquarium. Starting anew records the previous session while preserving
+  achievements and best scores. The in-tank dock uses a single compact icon-and-label row without
+  secondary descriptions, retaining 44-pixel touch targets and clear water
+  status. Safe-area spacing keeps controls clear of device edges.
+  The fish catalog is four compact purchase buttons, each with a fish preview,
+  name, and price, without a heading or a separate Add button. Compact headings, tighter
+  spacing, bounded panel widths, and independently scrolling content apply to
+  residents, status, settings, the field guide, prizes, and confirmations.
+  Panels and flyouts use outside-tap/Escape dismissal without redundant close
+  icons. Cancel remains available for confirmations.
   Routine discoveries and bonuses accumulate in **Recent moments**, rather
   than repeated popups. Feed, clean, orbit, or defend a resident without
   dismissing a tray. Critical care remains available alongside non-interactive,
@@ -340,12 +361,45 @@ Zen care remains automatic and retains normal surface feeding.
 Care is paced for observation rather than constant button presses. Fullness
 decays at 0.6 points per second (slower for nearby social schools), giving a full
 fish at least fifty seconds before it starts seeking food. A manual five-point
-drop provides at least one flake per hungry resident. Healthy adult pairs still
-reproduce, with an initial 35-to-65-second breeding respite. Sparse healthy tanks
+drop provides at least one flake per hungry resident. A healthy, well-fed adult male
+and female of the same species can reproduce after approaching and circling
+for four seconds, with an initial 25-to-45-second breeding respite. Each parent
+needs fullness above 60% and health above 70%, with water above 50%. Threats,
+poor water, or a full aquarium interrupt courtship. Sparse healthy tanks
 have substantially better birth odds than before; each birth renews a shared
 respite that lengthens with population, and birth odds decrease toward capacity.
-Resuming a sparse saved round also shortens excessive older breeding timers. Purchases remain the
+The base courtship chance is about 5% per eligible second before the population
+reduction. A brief, nonblocking announcement welcomes a baby and shows its bonus;
+urgent loss or defense messages take precedence.
+Resuming a sparse saved round also bounds breeding timers. Purchases remain the
 deliberate way to build a large population.
+
+Every fish receives a seeded random male/female assignment, including babies.
+Sex persists as fish grow and across saves. Males have species-specific color
+accents in both WebGL and Canvas rendering: strongly contrasting fin colors,
+broad saturated flank ribbons, and larger, brighter existing spots, stripes,
+and patches rather than added generic vertical bands. Patterned males also
+carry their accent color into their fins so the difference remains visible
+on a phone. Examples include turquoise betta fins, sapphire orange-koi patches,
+and mint lantern-fish photophores. Zen Garden's male White Cloud Minnows,
+Celestial Pearl Danios, and Threadfin Rainbowfish use softer rose-pink accents
+to suit the calm theme.
+Deep Ocean males have cyan, coral, mint,
+or violet luminous accents; male Neon Tetras have a lemon front ribbon and
+coral-red rear ribbon, while females retain the original blue/red colors. Accents grow
+stronger as babies mature, and females keep their original colors and patterns.
+Residents shows sex and adult male/female counts by species.
+
+Adult male Brushstroke Bettas can become territorial when they meet in actual
+3D space with no solid scenery between them. They flare their fins for four
+seconds before fighting; eight further seconds without intervention costs one
+fish its life. Tap near either rival or between them to separate them. Protective
+taps take priority over an overlapping visitor, never add stress, and never wake
+visitors. **K** separates the active rivals even outside the camera view. A small
+temporary cue follows the pair or points toward them offscreen. Separated males
+retreat and have a ninety-second settling period. Females, babies, and other
+species do not initiate these fights. Zen care separates rivals automatically.
+Courtship, fights, and settling timers all freeze on pause or backgrounding.
 
 ### Rules and deliberate clarifications
 
@@ -366,8 +420,7 @@ the original code and documents disagree, zq3d uses the documented behavior:
   active simulation time, never background wall-clock timers.
 - The Deep Ocean's 20-point resident is a **Barreleye**, with a finned swimming
   body and upward-looking luminous eyes, rather than a second jellyfish.
-  Its roster slot, price, size, speed, and shy/explorer traits are unchanged;
-  existing version-1 and version-2 saves retain the fish's identity and condition.
+  Its roster slot, price, size, speed, and shy/explorer traits are unchanged.
   Crystal Jelly remains a challenge visitor with its original behavior.
 
 Water deterioration retains the original dirt and overcrowding model. Cleaning
@@ -380,25 +433,21 @@ or an invulnerability mode.
 
 - A versioned, validated localStorage envelope at **`zenquarium_zq3d_v1`** holds
   settings, discoveries, statistics, and a complete resumable aquarium.
-  The stable key now contains schema version 9; valid version-1 through version-8
-  saves are upgraded in memory without discarding progress.
+  The stable key now contains schema version 10. This development update
+  deliberately requires a fresh aquarium rather than migrating earlier saves.
+  An explicit notice directs you to **Settings → Start fresh aquarium**.
+  Earlier data stays untouched until you confirm resetting zq3d; export first
+  if you want a backup. Resetting removes the previous aquarium and discoveries.
 - Saves include fish traits, growth, hunger, health, destinations, food, visitor
-  state, live hazards, seeded randomness, breeding timers, and pending milestones.
+  state, live hazards, seeded randomness, sex, social cooldowns, courtships,
+  territorial disputes, breeding timers, and pending milestones.
   Challenge phases, defense progress, prize unlocks, placements, active
   decoration effects, resident intentions, habitat routes, visit phases and dwell timers,
   banking, and the last 40 recent
   moments also survive a save/reload.
   Encounter warnings, defense progress, and electric-pulse hit records persist.
-  Active holds are cancelled when pausing or reloading; older encounters receive
-  a fresh warning window without discarding existing hazards or earned prizes.
-  Version-five Ink residents migrate by species slot, preserving identity,
-  hunger, health, growth, destinations, and trait intensity while adopting the
-  new illustration-friendly species.
-  The refreshed habitats retain resident identities, individual sizes, care
-  state, and earned prizes. Previous prize positions on steep slopes or inside new scenery
-  move to open sand, with a note in Recent moments; if no space is available,
-  the prize stays earned in the round's collection. Residents already inside
-  new solid scenery are moved clear without resetting the round.
+  Active holds are cancelled when pausing or reloading. Social encounters resume
+  with their saved phase and remaining intervention window, not wall-clock time.
 - Autosaves happen every 12 active seconds, on important actions, and when
   backgrounding. **Time does not advance while away.**
 - Returning from the background requires explicit resume. Rendering and sound
@@ -508,15 +557,35 @@ identify output starvation but do not establish what a person hears or prove
 which system component caused a stall; samples run sequentially under varying
 host load and are not a controlled latency benchmark.
 
+`python .\tests\responsive.py` performs bounded Edge layout checks across phone
+and small-tablet portrait/landscape sizes, measuring preview visibility, start
+and resume accessibility, all world choices without scrolling, compact controls,
+widget-specific panel anchoring, and rotation.
+It also exercises whole-row catalog purchases, command-bar hide/show, direct
+Zen care, pause and volume controls, residents,
+settings, progress, prizes, discoveries, the field guide, confirmations, pause,
+and session summaries, checking panel bounds, scrolling, and touch targets.
+
+`python .\tests\social.py` checks actual WebGL and forced Canvas rendering for
+male markings on every species, requiring substantial color contrast over at
+least 12% of each adult fish's visible area at desktop and phone resolutions,
+with a gentler contrast threshold for Zen Garden's three soft rose-pink species,
+not merely a few changed pixels. It also checks territorial fin flares and touch
+interventions across phone/tablet orientations. It also verifies that older
+development saves remain untouched until an explicit reset, other localStorage
+keys survive, and fresh aquariums save successfully. An optional directory
+argument writes representative screenshots and unobstructed female/male
+comparisons in phone portrait and landscape.
+
 Coverage includes exact scoring thresholds, all themes, purchase and reproduction
 caps, hazard survival, malformed snapshots, deterministic simulation, simulated
 ten-minute sessions, live non-modal trays, crab/eel defenses, prize progression,
-legacy save upgrades, mobile layouts, context loss, pause/resume, storage
+development-save rejection, mobile layouts, context loss, pause/resume, storage
 failures, concurrent windows, and an actual offline browser reload. Regression
 checks also measure 3D fish spacing and volume coverage across every theme at
 desktop/phone sizes, camera and near-plane clearance through full orbits and
 following, direct mouse/touch glass taps, pinch/drag isolation, theme colors, and
-existing Deep Ocean saves. Non-browser coverage includes shared habitat geometry,
+Deep Ocean resident identity. Non-browser coverage includes shared habitat geometry,
 rock clearance, sustained intentions, threat awareness, acceleration/turn/bank
 bounds, current drift, stable rotation, and deterministic save continuation.
 Additional checks cover body/travel alignment, species rhythms, completed
@@ -526,13 +595,19 @@ lookahead/cancellation using a fake audio context. These checks do not measure
 real-device frame rate, audio playback quality, or visual composition.
 Encounter coverage also verifies recurring warned attacks, actual ink/stinger
 losses, electric damage thresholds and per-pulse hit records, rock shelter,
-late/interrupted holds, completed departures, and save upgrades. Real-swimming
+late/interrupted holds, completed departures, and save roundtrips. Real-swimming
 scenarios isolate encounter harm from hunger and ordinary water decay; crab
 checks cover warned ground strikes, added sand pollution, interruption, cleaning,
 and the end of that added pollution after successful defense.
 Prize checks compare collision volumes to rendered mesh vertices and animated
 lid sweeps, exercise actual creature entrances and departures, and verify full
 body clearance, detour progress, placement/removal, and old saved overlaps.
-The browser harness additionally checks the four-action shell's 20-percent
-default viewport-coverage budget and menu-based controls. Emulation
+Social checks cover seeded persistent sexes, species-specific male coloration,
+visible birth announcements, adult breeding eligibility, real
+courtship swimming across all species, interruptions, true 3D territorial
+proximity and obstacle separation, warning/fight timing, protective-tap priority,
+cooldowns, Zen care, pause/background behavior, and saved encounter continuation.
+The browser harness additionally checks the quiet shell's default
+viewport-coverage budget and menu-based controls. Responsive checks cover the
+six-button command bar's touch targets and collapsed state. Emulation
 does not replace final hands-on iOS Safari and Android device testing.

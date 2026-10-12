@@ -688,6 +688,7 @@ const ZQRenderer = (() => {
         uniform float u_motion;
         uniform float u_effort;
         uniform float u_bubble;
+        uniform float u_flare;
         varying vec3 v_world;
         varying vec3 v_normal;
         varying vec3 v_local;
@@ -696,6 +697,7 @@ const ZQRenderer = (() => {
         void main() {
             vec3 p = a_position;
             if (u_kind < 0.5) {
+                if (a_part > 0.5 && a_part < 1.5) p.yz *= 1.0 + u_flare * 0.3;
                 if (a_part > 3.5 && a_part < 4.5) {
                     p.y = -0.03 + (p.y + 0.03) * (1.0 + u_bubble * 1.4 * u_motion);
                     p.x += u_bubble * 0.035 * u_motion;
@@ -767,6 +769,9 @@ const ZQRenderer = (() => {
         uniform float u_time;
         uniform float u_motion;
         uniform float u_pattern;
+        uniform float u_male;
+        uniform float u_mark;
+        uniform vec3 u_markColor;
         uniform float u_ink;
         uniform float u_style;
         uniform float u_deep;
@@ -830,6 +835,34 @@ const ZQRenderer = (() => {
                 }
                 float scales = sin(v_local.x * 90.0 + sin(v_local.y * 64.0)) * sin(v_local.y * 64.0);
                 base *= 0.98 + scales * 0.018;
+            }
+            if (u_male > 0.0) {
+                float marking = 0.0;
+                if ((u_mark < 0.5 || u_mark > 1.5) && v_part > 0.5 && v_part < 1.5) {
+                    float rim = max(smoothstep(0.22, 0.65, abs(v_local.y)), smoothstep(0.65, 1.4, -v_local.x));
+                    marking = u_mark < 0.5 ? 0.55 + rim * 0.4 : 0.7 + rim * 0.25;
+                } else if (u_mark > 0.5 && u_mark < 1.5 && v_part < 0.5) {
+                    float ribbon = abs(v_local.y - 0.04 - sin((v_local.x + 0.25) * 3.0) * 0.025);
+                    marking = (1.0 - smoothstep(0.07, 0.16, ribbon)) * 0.95 *
+                        smoothstep(-0.7, -0.5, v_local.x) * (1.0 - smoothstep(0.5, 0.7, v_local.x));
+                } else if (u_mark > 1.5 && v_part < 0.5) {
+                    if (u_pattern < 0.5) {
+                        float patch = sin(v_local.x * 9.0 + sin(v_local.y * 14.0)) * cos(v_local.z * 12.0 + v_local.x * 3.0);
+                        marking = smoothstep(0.25, 0.42, patch) * 0.9;
+                    } else if (u_pattern > 2.5 && u_pattern < 3.5) {
+                        marking = smoothstep(0.45, 0.65, sin(v_local.x * 17.0)) * 0.85;
+                    } else if (u_pattern > 5.5 && u_pattern < 6.5) {
+                        marking = step(0.65, sin(v_local.x * 39.0)) *
+                            (1.0 - smoothstep(0.04, 0.09, abs(v_local.y + 0.11))) * 0.98;
+                    } else if (u_pattern > 11.5) {
+                        float spots = sin(v_local.x * 27.0) * sin(v_local.y * 55.0);
+                        marking = smoothstep(0.6, 0.85, spots) * 0.98;
+                    }
+                }
+                vec3 markColor = u_markColor;
+                if (u_pattern > 3.5 && u_pattern < 4.5 && v_local.x < -0.05) markColor = vec3(1.0, 0.45, 0.52);
+                base = mix(base, markColor, marking * u_male);
+                glow += marking * u_male * u_deep * 0.4;
             }
             vec3 lightDir = normalize(vec3(-0.35, 0.9, 0.45));
             float diffuse = max(0.0, dot(normal, lightDir));
@@ -1248,7 +1281,7 @@ const ZQRenderer = (() => {
                 offset += size;
             }
         }
-        drawMesh(mesh, matrix, kind, phase, accent, pattern = 7, alpha = 1, effort = 1, bubble = 0) {
+        drawMesh(mesh, matrix, kind, phase, accent, pattern = 7, alpha = 1, effort = 1, bubble = 0, male = 0, mark = null, flare = 0) {
             const gl = this.gl, p = this.main;
             this.attributes(p.program, mesh.buffer, [['a_position', 3], ['a_normal', 3], ['a_color', 3], ['a_part', 1]], 10);
             gl.uniformMatrix4fv(p.uniform('u_model'), false, matrix);
@@ -1259,6 +1292,10 @@ const ZQRenderer = (() => {
             gl.uniform1f(p.uniform('u_alpha'), alpha);
             gl.uniform1f(p.uniform('u_effort'), effort);
             gl.uniform1f(p.uniform('u_bubble'), bubble);
+            gl.uniform1f(p.uniform('u_flare'), flare);
+            gl.uniform1f(p.uniform('u_male'), male);
+            gl.uniform1f(p.uniform('u_mark'), mark ? mark.kind : 0);
+            gl.uniform3fv(p.uniform('u_markColor'), mark ? color(mark.color) : [0, 0, 0]);
             gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
         }
         particleData(state, time) {
@@ -1412,7 +1449,9 @@ const ZQRenderer = (() => {
                 this.drawMesh(this.fishMeshes[f.type], model(f.pos, f.yaw, bubble.pitch, ZQ.fishScale(f), this.reduced ? 0 : f.roll),
                     0, f.phase, color(def.accent), def.pattern, 1,
                     ZQ.clamp((Math.hypot(...f.vel) / def.speed) *
-                        (0.4 + ZQ.swimRhythm(f, def).propulsion * 0.6), 0.2, 1.5), bubble.pulse);
+                        (0.4 + ZQ.swimRhythm(f, def).propulsion * 0.6), 0.2, 1.5), bubble.pulse,
+                    f.sex === 'male' ? 0.35 + f.growth * 0.65 : 0, ZQ.maleMark(def),
+                    ['display', 'fight'].includes(f.activity) ? 1 : 0);
             }
             gl.enable(gl.BLEND);
             const c = state.creature;
@@ -1428,7 +1467,8 @@ const ZQRenderer = (() => {
                 const def = this.theme.fish[f.type];
                 const pose = ZQ.deathPose(f);
                 this.drawMesh(this.fishMeshes[f.type], model(f.pos, f.yaw, pose.pitch, ZQ.fishScale(f), pose.roll),
-                    0, f.phase, color(def.accent), def.pattern, pose.alpha, 0);
+                    0, f.phase, color(def.accent), def.pattern, pose.alpha, 0, 0,
+                    f.sex === 'male' ? 0.35 + f.growth * 0.65 : 0, ZQ.maleMark(def));
             }
             for (const attack of state.attacks) if (attack.kind === 'ink') {
                 for (const blob of ZQ.inkBlobs(attack)) this.drawMesh(this.cloudMesh, model(blob.pos, 0, 0, blob.radius[0]),
@@ -1579,7 +1619,21 @@ const ZQRenderer = (() => {
                     const direction = Math.cos(f.yaw - this.camera.yaw) < 0 ? -1 : 1;
                     ctx.scale(size * direction, size);
                     ctx.rotate(entity.dead ? -ZQ.deathPose(f).pitch : -bubble.pitch + (this.reduced ? 0 : f.roll * 0.3));
-                    const { ry, tailSpan, tailLength, finHeight } = fishForm(def);
+                    const form = fishForm(def), ry = form.ry, tailLength = form.tailLength;
+                    const flare = !entity.dead && ['display', 'fight'].includes(f.activity) ? 1.3 : 1;
+                    const tailSpan = form.tailSpan * flare, finHeight = form.finHeight * flare;
+                    const mark = f.sex === 'male' ? ZQ.maleMark(def) : null;
+                    const maturity = 0.35 + f.growth * 0.65;
+                    const bloom = mark && mark.kind !== 1 ? ctx.createRadialGradient(-0.25, 0, 0, -0.25, 0, Math.max(tailLength, finHeight)) : null;
+                    if (bloom) { bloom.addColorStop(0, `${mark.color}${mark.kind === 0 ? '90' : 'bf'}`); bloom.addColorStop(1, mark.color); }
+                    const fillFin = outline => {
+                        ctx.fill();
+                        if (bloom) {
+                            ctx.save(); ctx.fillStyle = bloom; ctx.globalAlpha *= maturity * 0.95;
+                            ctx.fill(); ctx.restore();
+                        }
+                        if (outline) ctx.stroke();
+                    };
                     ctx.fillStyle = def.fin; ctx.strokeStyle = theme.id === 'ink' ? '#263742' : def.accent; ctx.lineWidth = theme.id === 'ink' ? 0.035 : 0.02;
                     ctx.beginPath(); ctx.moveTo(-0.6, 0);
                     if (def.shape === 'betta') {
@@ -1589,11 +1643,11 @@ const ZQRenderer = (() => {
                         ctx.lineTo(-tailLength, -tailSpan / 2); ctx.lineTo(def.shape === 'lyretail' ? -0.95 : -1.1 + Math.sin(f.phase) * 0.12, 0);
                         ctx.lineTo(-tailLength, tailSpan / 2);
                     }
-                    ctx.closePath(); ctx.fill(); if (theme.id === 'ink') ctx.stroke();
+                    ctx.closePath(); fillFin(theme.id === 'ink');
                     if (['betta', 'lyretail', 'catfish'].includes(def.shape)) {
                         for (const side of [-1, 1]) {
                             ctx.beginPath(); ctx.moveTo(0.22, side * ry * 0.8); ctx.lineTo(-0.35, side * finHeight);
-                            ctx.lineTo(-0.61, side * ry * 0.5); ctx.closePath(); ctx.fill(); ctx.stroke();
+                            ctx.lineTo(-0.61, side * ry * 0.5); ctx.closePath(); fillFin(true);
                         }
                     }
                     const gradient = ctx.createLinearGradient(0, -ry, 0, ry);
@@ -1660,7 +1714,7 @@ const ZQRenderer = (() => {
                         ctx.restore();
                     }
                     if (def.shape === 'threadfin') for (const side of [-1, 1]) {
-                        ctx.strokeStyle = def.accent; ctx.lineWidth = 0.012;
+                        ctx.strokeStyle = mark?.kind === 0 ? mark.color : def.accent; ctx.lineWidth = 0.012;
                         ctx.beginPath(); ctx.moveTo(-0.12, side * ry);
                         ctx.bezierCurveTo(-0.48, side * 0.75, -0.95, side * 1.02, -1.35, side * 0.92); ctx.stroke();
                     }
@@ -1674,6 +1728,29 @@ const ZQRenderer = (() => {
                         ctx.strokeStyle = PARAMS.neon; ctx.lineWidth = 0.055;
                         ctx.beginPath(); ctx.moveTo(0.5, -0.02); ctx.lineTo(-0.1, -0.02); ctx.stroke();
                         ctx.strokeStyle = PARAMS.red; ctx.beginPath(); ctx.moveTo(-0.1, 0.02); ctx.lineTo(-0.6, 0.02); ctx.stroke();
+                    }
+                    if (mark && mark.kind !== 0) {
+                        ctx.save(); clipBody(); ctx.strokeStyle = mark.color; ctx.fillStyle = mark.color;
+                        ctx.globalAlpha *= maturity * (mark.kind === 1 ? 0.95 : def.pattern === 0 ? 0.9 : def.pattern === 3 ? 0.85 : 0.98);
+                        if (mark.kind === 1) {
+                            const ribbon = ctx.createLinearGradient(-0.65, 0, 0.65, 0);
+                            ribbon.addColorStop(0, def.id === 'neon' ? '#ff7485' : mark.color);
+                            ribbon.addColorStop(0.46, def.id === 'neon' ? '#ff7485' : mark.color);
+                            ribbon.addColorStop(0.54, mark.color); ribbon.addColorStop(1, mark.color);
+                            ctx.strokeStyle = ribbon; ctx.lineWidth = 0.22; ctx.lineCap = 'round';
+                            ctx.beginPath(); ctx.moveTo(-0.6, -0.02); ctx.quadraticCurveTo(0, -0.1, 0.6, -0.05); ctx.stroke();
+                        } else if (def.pattern === 0) for (let i = 0; i < 3; i++) {
+                            ctx.beginPath(); ctx.ellipse(-0.4 + i * 0.34, (i % 2 ? 1 : -1) * ry * 0.25,
+                                0.16, ry * 0.58, i * 0.6, 0, Math.PI * 2); ctx.fill();
+                        } else if (def.pattern === 3) {
+                            ctx.lineWidth = 0.12;
+                            for (const x of [-0.42, 0, 0.42]) { ctx.beginPath(); ctx.moveTo(x, -ry); ctx.lineTo(x, ry); ctx.stroke(); }
+                        } else if (def.pattern === 6) for (let x = -0.5; x < 0.5; x += 0.18) {
+                            ctx.beginPath(); ctx.arc(x, ry * 0.35, 0.055, 0, Math.PI * 2); ctx.fill();
+                        } else if (def.pattern === 12) for (let i = 0; i < 12; i++) {
+                            ctx.beginPath(); ctx.arc(-0.5 + (i % 4) * 0.25, -0.11 + Math.floor(i / 4) * 0.11, 0.045, 0, Math.PI * 2); ctx.fill();
+                        }
+                        ctx.restore();
                     }
                     ctx.fillStyle = PARAMS.eye;
                     ctx.beginPath(); ctx.ellipse(0.72, 0.03, 0.025,

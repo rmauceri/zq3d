@@ -1,7 +1,7 @@
 'use strict';
 
 const PREFIX = 'zq3d-shell-';
-const CACHE = `${PREFIX}v21`;
+const CACHE = `${PREFIX}v32`;
 const ROOT = new URL('./', self.location.href);
 const ASSETS = [
     './index.html', './styles.css', './core.js', './renderer.js', './audio.js',
