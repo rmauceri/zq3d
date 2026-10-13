@@ -221,7 +221,7 @@
         assert(g.state.ended);
         equal(g.state.reason, 'The water became uninhabitable.');
     });
-    test('Milestones wait one active second and stay nonblocking while preserving Stop and Continue choices', () => {
+    test('Milestones wait one active second and acknowledgment stays nonblocking', () => {
         const g = make();
         g.state.score = 1000;
         steps(g, 0.5);
@@ -403,6 +403,109 @@
         equal(g.state.attacks.length, 0);
         assert(!g.tapCreature().ok);
         core.validateSave(envelope(g));
+    });
+    test('Quick defense rewards meet exact timing thresholds for every creature and cannot double-award', () => {
+        for (const kind of ['jellyfish', 'squid', 'octopus', 'crab', 'eel']) {
+            const theme = Object.values(core.THEMES).find(t => t.visitors.some(v => v.kind === kind));
+            for (const [seconds, expected] of [[0, 60], [3, 60], [3.5, 59], [13, 40], [23, 20], [90, 20]]) {
+                const g = make(theme.id), c = spawn(g, kind);
+                c.age = 100; c.defenseStartedAt = 100 - seconds;
+                const before = g.state.score;
+                g.state.multiplier = 3;
+                g.drainEvents();
+                g.repelChallenge(c);
+                equal(g.state.score - before, expected);
+                g.checkAchievements();
+                equal(g.profile.highScore, Math.floor(g.state.score));
+                const reward = g.drainEvents().filter(e => e.type === 'defended');
+                equal(reward.length, 1); equal(reward[0].amount, expected);
+                assert(g.state.activity.some(e => e.type === 'defended' && e.amount === expected));
+                const stats = JSON.stringify(g.state.stats);
+                g.repelChallenge(c);
+                equal(g.state.score - before, expected);
+                equal(JSON.stringify(g.state.stats), stats);
+                equal(g.drainEvents().filter(e => e.type === 'defended').length, 0);
+                const data = core.validateSave(envelope(g));
+                const restored = new core.Game(g.theme.id, data.profile, {snapshot: data.session});
+                restored.resume();
+                const restoredScore = restored.state.score;
+                restored.repelChallenge(restored.state.creature);
+                equal(restored.state.score, restoredScore);
+            }
+        }
+    });
+    test('Defenses start timing on entry or the first early swipe, not the approach', () => {
+        const g = make('koi'), c = spawn(g, 'jellyfish');
+        c.age = 20; c.pos = [0, 0, 0]; c.entered = true;
+        g.advanceEncounter(c, 0.1, true);
+        equal(c.defenseStartedAt, 20);
+        c.age = 33;
+        const before = g.state.score;
+        g.repelChallenge(c); equal(g.state.score - before, 40);
+        const early = make('koi'), visitor = spawn(early, 'jellyfish');
+        visitor.age = 15;
+        early.defendCreature('swipe', 1);
+        equal(visitor.defenseStartedAt, 15);
+        visitor.age = 28;
+        visitor.decoyCooldown = 0; early.defendCreature('swipe', 1);
+        visitor.decoyCooldown = 0;
+        const beforeEarly = early.state.score;
+        early.defendCreature('swipe', 1);
+        equal(early.state.score - beforeEarly, 40);
+    });
+    test('Eel mandatory waits and milestone acknowledgments do not penalize or interrupt a prompt hold', () => {
+        const g = make(), c = spawn(g, 'eel');
+        c.pos = [0, -2, -1.2]; c.entered = true; c.age = 30;
+        equal(c.defenseStartedAt, null);
+        for (let i = 0; i < 61 && c.phase !== 'windup'; i++) g.updateCreature(0.1);
+        equal(c.phase, 'windup');
+        assert(c.defenseStartedAt >= 35.9);
+        const before = g.state.score;
+        assert(g.beginCreatureHold().ok); g.updateCreature(0.3);
+        g.state.milestone = 'bronze'; g.state.milestones = ['bronze'];
+        g.continueMilestone();
+        assert(g.heldCreature === c); near(c.holdCharge, 0.3);
+        for (let i = 0; i < 5 && !c.defended; i++) g.updateCreature(0.1);
+        assert(c.defended); equal(g.state.score - before, 60);
+    });
+    test('Defense clocks freeze while paused, persist through saves and reject invalid timing fields', () => {
+        const g = make(), c = spawn(g, 'crab');
+        c.age = 30; c.defenseStartedAt = 17;
+        g.state.paused = true;
+        steps(g, 30); equal(c.age, 30);
+        const data = core.validateSave(envelope(g));
+        const resumed = new core.Game(g.theme.id, data.profile, {snapshot: data.session});
+        resumed.resume();
+        const before = resumed.state.score;
+        resumed.repelChallenge(resumed.state.creature);
+        equal(resumed.state.score - before, 40);
+        for (const value of [-1, 31, '17', NaN, Infinity, undefined]) {
+            const invalid = envelope(g); invalid.session.creature.defenseStartedAt = value;
+            throws(() => core.validateSave(invalid));
+        }
+        const older = envelope(g); delete older.session.creature.defenseStartedAt;
+        core.validateSave(older);
+        const compatible = new core.Game(g.theme.id, older.profile, {snapshot: older.session});
+        equal(compatible.state.creature.defenseStartedAt, null);
+    });
+    test('Only active current visitors earn defense points and peaceful departure stays a separate one-time bonus', () => {
+        const g = make('koi'), c = spawn(g, 'jellyfish'), before = g.state.score;
+        g.state.paused = true; g.repelChallenge(c); assert(!c.defended); equal(g.state.score, before);
+        g.state.paused = false;
+        g.repelChallenge({...c}); assert(!c.defended); equal(g.state.score, before);
+        g.repelChallenge(null); equal(g.state.score, before);
+        g.repelChallenge(c); equal(g.state.score, before + 60);
+        c.pos = [g.state.bounds.width + 2, 0, g.state.bounds.depth + 2.5];
+        g.updateCreature(0.01);
+        equal(g.state.creature, null); equal(g.state.score, before + 90);
+        g.updateCreature(0.01); equal(g.state.score, before + 90);
+        const crab = make(), hungry = spawn(crab, 'crab');
+        hungry.eaten = 1;
+        const crabBefore = crab.state.score;
+        crab.repelChallenge(hungry); equal(crab.state.score, crabBefore + 60);
+        hungry.pos = [crab.state.bounds.width + 2, crab.state.bounds.floor + 0.42, crab.state.bounds.depth + 2.5];
+        crab.updateCreature(0.01);
+        equal(crab.state.creature, null); equal(crab.state.score, crabBefore + 60);
     });
     test('Attack survival bonuses wait for active-time expiry and require living survivors', () => {
         const g = make();

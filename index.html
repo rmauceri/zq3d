@@ -128,7 +128,7 @@
             </div>
             <nav class="header-actions" aria-label="Application">
                 <button class="quiet-button" id="journal-button" aria-label="Open field guide"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg><span class="wide-label">Field guide</span></button>
-                <button class="quiet-button" id="sound-button" aria-pressed="false" aria-label="Enable sound"><svg class="icon" aria-hidden="true"><use href="#i-muted"/></svg><span id="sound-label" class="wide-label">Sound off</span></button>
+                <button class="quiet-button" id="sound-button" aria-expanded="false" aria-controls="tray" aria-label="Sound controls. Muted"><svg class="icon" aria-hidden="true"><use href="#i-muted"/></svg><span id="sound-label" class="wide-label">Sound</span></button>
                 <button class="quiet-button icon-button" id="settings-button" aria-label="Settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg></button>
             </nav>
         </header>
@@ -185,7 +185,7 @@
         <div class="pause-card" id="pause-card" hidden>
             <span class="eyebrow">A MOMENT TO YOURSELF</span>
             <h2>Taking a breath.</h2>
-            <p id="pause-reason">Your aquarium is paused. Use Save &amp; Return before closing to keep this session.</p>
+            <p id="pause-reason">Your aquarium is paused. Save &amp; Return keeps it for later.</p>
             <button class="primary-button" id="unpause-button"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> Resume aquarium</button>
             <button class="quiet-button" id="pause-home-button">Save &amp; Return</button>
         </div>
@@ -205,10 +205,6 @@
     <button class="exit-immersion" id="exit-immersion" hidden><svg class="icon" aria-hidden="true"><use href="#i-expand"/></svg> Exit immersive view</button>
     <div id="save-warning" class="save-warning" role="alert" hidden></div>
     <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
-    <aside id="milestone-notice" class="milestone-notice" aria-labelledby="milestone-title" hidden>
-        <strong id="milestone-title" role="status" aria-live="polite"></strong>
-        <div><button class="small-button" id="milestone-end">Stop</button><button class="small-button" id="milestone-continue">Continue</button></div>
-    </aside>
     <button id="update-button" class="update-button" hidden>Update ready &middot; Save &amp; reload</button>
 
     <aside id="tray" class="tray" role="region" aria-labelledby="tray-title" tabindex="-1" hidden>

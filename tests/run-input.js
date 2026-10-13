@@ -15,6 +15,14 @@ let frame, clock = 1000;
 w.performance.now = () => clock;
 w.requestAnimationFrame = callback => { frame = callback; return 1; };
 w.cancelAnimationFrame = () => { frame = null; };
+const idleJobs = new Map();
+let idleId = 0;
+w.requestIdleCallback = callback => { idleJobs.set(++idleId, callback); return idleId; };
+w.cancelIdleCallback = id => idleJobs.delete(id);
+const flushIdle = () => {
+    const jobs = [...idleJobs.values()]; idleJobs.clear();
+    for (const job of jobs) job({ didTimeout: false, timeRemaining: () => 50 });
+};
 w.matchMedia = () => ({ matches: false, addEventListener() {} });
 const resizeObservers = new Map();
 w.ResizeObserver = class {
@@ -225,12 +233,28 @@ try {
     }
     initialTheme.click();
     console.log('PASS Theme selection, preview, checkmark and grouped Start label agree; hover does not select or launch');
+    const initialVolume = evaluate('ZQApp.settings.volume');
+    $('sound-button').focus(); $('sound-button').click();
+    assert.equal($('tray').dataset.kind, 'volume');
+    assert.equal($('tray').dataset.anchor, 'sound');
+    assert.equal($('sound-button').getAttribute('aria-expanded'), 'true');
+    assert(!evaluate('ZQApp.settings.sound'), 'Opening sound controls unexpectedly enabled audio');
+    $('dock-volume').value = '45'; $('dock-volume').dispatchEvent(new w.Event('input', { bubbles: true }));
+    $('volume-mute').click(); $('volume-mute').click();
+    assert.equal(evaluate('ZQApp.settings.volume'), 0.45, 'Muting lost the preferred volume');
+    $('dock-volume').value = String(initialVolume * 100);
+    $('dock-volume').dispatchEvent(new w.Event('input', { bubbles: true }));
+    key('keydown', 'Escape');
+    assert.equal(w.document.activeElement, $('sound-button'));
+    assert.equal($('sound-button').getAttribute('aria-expanded'), 'false');
+    assert.equal(evaluate('ZQApp.game'), null);
+    console.log('PASS Welcome sound uses the shared light-dismiss volume flyout without starting a tank or discarding mute volume');
     $('begin-button').click(); pump(2);
     const initialGame = JSON.parse(evaluate('JSON.stringify(ZQApp.game.snapshot())'));
     assert.equal(initialGame.themeId, initialTheme.dataset.theme);
-    assert.equal(stored().session, null, 'Starting created an automatic resume point');
+    assert(stored().session, 'Starting did not create a best-effort initial checkpoint');
     assert.equal(evaluate('ZQApp.save()'), true);
-    assert.equal(stored().session, null, 'A routine save stored the live aquarium');
+    assert.equal(stored().session.elapsed, 0, 'A routine preference save unexpectedly rebuilt the checkpoint');
     returnHome();
     assert(!$('resume-card').hidden && !$('resume-button').hidden);
     const resumeLabel = 'Resume last session';
@@ -251,7 +275,7 @@ try {
         assert.equal(evaluate('ZQApp.game'), null);
     }
     $('resume-button').click();
-    assert.equal(stored().session, null, 'Resuming did not consume the saved slot');
+    assert(stored().session, 'Resuming lost its recoverable checkpoint');
     assert.equal(evaluate('ZQApp.game.state.themeId'), initialGame.themeId, 'Resume started the previewed theme');
     assert.equal(evaluate('ZQApp.game.state.elapsed'), initialGame.elapsed);
     assert.equal(evaluate('JSON.stringify(ZQApp.game.state.fish.map(f => [f.id, f.sex, f.health, f.hunger]))'),
@@ -276,8 +300,12 @@ try {
     assert.equal($('encounter-hint').querySelectorAll('button').length, 0);
     assert.equal($('care-action-secondary'), null);
     pump(24); swipe(600, 300, 'touch'); assert.equal(progress(), 2);
-    pump(24); swipe(500, 400, 'touch'); assert(evaluate('ZQApp.game.state.creature.defended'));
-    assert(!$('toast').hidden && $('toast').textContent.includes('leaving'), 'Successful defense had no visible confirmation');
+    pump(24);
+    const quickDefenseScore = evaluate('ZQApp.game.state.score');
+    swipe(500, 400, 'touch'); assert(evaluate('ZQApp.game.state.creature.defended'));
+    assert.equal(evaluate('ZQApp.game.state.score') - quickDefenseScore, 60);
+    assert(!$('toast').hidden && $('toast').textContent.includes('chased away') && $('toast').textContent.includes('pts'),
+        'Successful defense had no visible reward confirmation');
     console.log('PASS Mouse/touch outward swipes defend directly without camera movement, stressful taps, or popup controls');
 
     spawn('crab');
@@ -587,22 +615,18 @@ try {
     assert(!$('panel').open && evaluate('ZQApp.game !== null'), 'Entering a new aquarium added a confirmation');
     $('menu-button').click();
     w.document.querySelector('[data-menu-action="settings"]').click();
-    $('end-session-button').click();
-    assert($('panel').open, 'Finish-session confirmation was not modal');
-    assert($('panel-logo').hidden && $('panel-version').hidden && !$('panel-eyebrow').hidden,
-        'About branding leaked into the confirmation heading');
-    $('panel').getBoundingClientRect = () => ({ left: 300, right: 900, top: 200, bottom: 600 });
-    $('panel').dispatchEvent(new w.MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 500, clientY: 300 }));
-    assert($('panel').open, 'An inside tap dismissed the confirmation');
-    const outside = new w.MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 });
-    $('panel').dispatchEvent(outside);
-    assert(!$('panel').open, 'Confirmation did not dismiss on its backdrop');
-    assert(!evaluate('ZQApp.game.state.ended'), 'Backdrop dismissal confirmed a destructive action');
+    assert(!$('end-session-button') && !$('save-home-button'), 'Settings still contains redundant or destructive session exits');
+    key('keydown', 'Escape');
     $('menu-button').click();
-    w.document.querySelector('[data-menu-action="settings"]').click();
-    $('end-session-button').click();
-    $('panel').dispatchEvent(new w.Event('cancel', { cancelable: true }));
-    assert(!$('panel').open, 'Escape did not cancel confirmation');
+    assert.deepEqual([...w.document.querySelectorAll('#tray [data-menu-action]')].map(b => b.dataset.menuAction),
+        ['journal', 'settings', 'immerse', 'camera', 'home']);
+    w.document.querySelector('[data-menu-action="camera"]').click();
+    assert.equal($('tray').dataset.kind, 'camera');
+    assert.equal(w.document.querySelectorAll('#tray [data-menu-action]').length, 6);
+    const cameraBefore = evaluate('ZQApp.renderer.camera.yaw');
+    w.document.querySelector('[data-menu-action="orbit"]').click();
+    assert.notEqual(evaluate('ZQApp.renderer.camera.yaw'), cameraBefore);
+    key('keydown', 'Escape');
     returnHome();
     w.document.querySelector('[data-theme="ink"]').click();
     assert.equal(w.document.documentElement.dataset.theme, 'dark', 'Pen & Ink welcome screen became light');
@@ -611,30 +635,31 @@ try {
     $('resume-button').click(); pump(1);
     evaluate('ZQApp.game.state.creature=null; ZQApp.game.state.attacks=[]; ZQApp.game.state.score=2500; ZQApp.game.state.milestones=["bronze"]; ZQApp.game.state.pending=null');
     pump(75);
-    assert(!$('milestone-notice').hidden);
+    assert(!$('toast').hidden && $('toast').dataset.kind === 'milestone');
     assert(!$('panel').open && !evaluate('ZQApp.game.state.paused'), 'Milestone blocked the aquarium');
-    assert($('milestone-title').textContent.includes('Silver'));
+    assert($('toast').textContent.includes('Silver'));
+    assert(!$('milestone-notice') && !$('milestone-continue') && !$('milestone-end'));
+    assert(!evaluate('ZQApp.game.state.milestone'), 'Ignoring a notice blocked later milestones');
     const milestoneTime = evaluate('ZQApp.game.state.elapsed');
     pump(10);
     assert(evaluate('ZQApp.game.state.elapsed') > milestoneTime, 'Milestone stopped simulation time');
     returnHome(); $('resume-button').click(); pump(1);
-    assert(!$('milestone-notice').hidden && !evaluate('ZQApp.game.state.paused'), 'Resumed milestone restored a blocking pause');
+    assert(!evaluate('ZQApp.game.state.paused || ZQApp.game.state.milestone'), 'Resume restored a pending milestone prompt');
     $('feed-button').click(); key('keydown', 'Escape');
-    $('milestone-continue').click();
-    assert($('milestone-notice').hidden && !evaluate('ZQApp.game.state.milestone'));
     evaluate('ZQApp.game.state.score=5000');
     pump(75);
-    assert($('milestone-title').textContent.includes('Gold'));
-    $('milestone-end').click();
-    assert(evaluate('ZQApp.game.state.ended && ZQApp.game.state.outcome==="victory"'));
-    assert($('panel').open && $('milestone-notice').hidden);
+    assert($('toast').textContent.includes('Gold'));
+    assert(!evaluate('ZQApp.game.state.ended || ZQApp.game.state.paused'));
+    evaluate("ZQApp.game.update=()=>ZQApp.game.finish('defeat','Your last fish was lost.')");
+    pump(1);
+    assert($('panel').open);
     $('panel').dispatchEvent(new w.MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }));
     assert(!$('panel').open && evaluate('ZQApp.game') === null, 'Summary did not light-dismiss home');
     $('begin-button').click(); pump(1);
     assert.equal(evaluate('ZQApp.game.theme.id'), 'ink');
     assert.equal(w.document.documentElement.dataset.theme, 'light', 'Pen & Ink lost its in-tank palette');
     assert.equal(w.document.documentElement.style.getPropertyValue('--cp-aquarium-accent'), '#735096');
-    console.log('PASS Confirmations, summaries, and score trays light-dismiss; milestones keep playing with one-click choices; Ink welcome stays dark');
+    console.log('PASS Confirmations and summaries light-dismiss; milestones use ordinary notifications and never block later milestones');
     const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
     const opacity = Number(css.match(/--cp-panel: color-mix\(in srgb, var\(--cp-aquarium-bg\) (\d+)%, transparent\)/)[1]) / 100;
     assert.equal(opacity, 0.84);
@@ -753,8 +778,8 @@ try {
     assert.equal($('tray').dataset.anchor, 'health', 'Health descendants lost their source anchor');
     $('menu-button').click();
     assert.equal($('tray').dataset.anchor, 'menu');
-    w.document.querySelector('[data-menu-action="score"]').click();
-    assert.equal($('tray').dataset.anchor, 'menu', 'Menu status inherited the health anchor');
+    w.document.querySelector('[data-menu-action="camera"]').click();
+    assert.equal($('tray').dataset.anchor, 'menu', 'Camera controls inherited the health anchor');
     $('score-button').click();
     assert.equal($('tray').dataset.anchor, 'health');
     key('keydown', 'Escape');
@@ -787,7 +812,7 @@ try {
     assert.equal(evaluate('ZQApp.game.state.creature.holdCharge'), 0, 'Protective tap started an overlapping eel hold');
     assert.equal(captures.size, 0);
     assert($('social-hint').hidden);
-    assert.equal(stored().session, null, 'A protective glass tap created a resume point');
+    assert.equal(stored().session.disputes.length, 0, 'A protective glass tap rebuilt the cached checkpoint');
     returnHome();
     const protectedSave = stored();
     assert(protectedSave.session.fish.every(f => f.sex === 'male' && f.socialCooldown === 90));
@@ -824,7 +849,7 @@ try {
     console.log('PASS Rival cues, touch and keyboard separation take priority over overlapping visitors without stress; drags and cancelled/multitouch gestures stay safe');
     setupDispute(); pump(1);
     w.dispatchEvent(new w.Event('pagehide'));
-    assert.equal(stored().session, null, 'Backgrounding saved the running round without Save & Return');
+    assert(stored().session?.paused, 'Backgrounding did not checkpoint the paused round');
     const socialPaused = evaluate('JSON.stringify(ZQApp.game.snapshot())');
     assert($('social-hint').hidden);
     pump(30);
@@ -837,7 +862,7 @@ try {
     assert.equal(evaluate('ZQApp.game.state.stats.lost'), 0);
     assert($('social-hint').hidden);
     $('zen-button').click();
-    evaluate(`{const g=ZQApp.game; g.state.fish[1].sex='female';
+    evaluate(`{const g=ZQApp.game; g.state.fish=g.state.fish.slice(0,2);g.state.fish[1].sex='female';
         g.state.fish.forEach(f=>{f.socialCooldown=0;f.fear=0;f.hunger=100;f.health=100;});}`);
     $('score-button').click(); w.document.querySelector('[data-menu-action="residents"]').click();
     assert($('resident-list').textContent.includes('Male') && $('resident-list').textContent.includes('Female'));
@@ -875,7 +900,8 @@ try {
     w.document.querySelector('[data-menu-action="settings"]').click();
     assert.equal($('tray-title').textContent, 'Settings');
     assert(!$('settings-display').open && !$('settings-install').open);
-    for (const id of ['setting-sound', 'setting-volume', 'setting-motion']) {
+    assert(!$('setting-sound') && !$('setting-volume'), 'Settings duplicates the integrated sound control');
+    for (const id of ['setting-motion']) {
         assert(!$(id).closest('details'), `${id} is hidden among device options`);
     }
     assert.equal($('setting-quality').closest('details'), $('settings-display'));
@@ -903,13 +929,14 @@ try {
     assert($('settings-display').open, 'Changing a preference collapsed the section');
     assert.equal(stored().settings.quality, 'battery');
     assert.equal(stored().settings.motion, 'reduced');
-    assert.equal(stored().session, null, 'Changing preferences saved the live round');
+    const preferenceCheckpoint = stored().session;
+    assert(preferenceCheckpoint, 'Changing preferences erased the checkpoint');
     evaluate('ZQApp.renderer.is3D=false');
-    $('setting-volume').dispatchEvent(new w.Event('input', { bubbles: true }));
+    $('setting-quality').dispatchEvent(new w.Event('change', { bubbles: true }));
     assert(!$('settings-graphics-warning').hidden && !$('settings-graphics-warning').closest('details'));
     assert($('settings-graphics-warning').textContent.includes('Canvas 2D'));
     evaluate('ZQApp.renderer.is3D=true');
-    $('setting-volume').dispatchEvent(new w.Event('input', { bubbles: true }));
+    $('setting-quality').dispatchEvent(new w.Event('change', { bubbles: true }));
     assert($('settings-graphics-warning').hidden);
     const secureContext = Object.getOwnPropertyDescriptor(w, 'isSecureContext');
     Object.defineProperty(w, 'isSecureContext', { value: true, configurable: true });
@@ -924,12 +951,13 @@ try {
     if (secureContext) Object.defineProperty(w, 'isSecureContext', secureContext);
     else delete w.isSecureContext;
     key('keydown', 'Escape');
-    console.log('PASS Settings prioritize sound/motion, retain device preferences, and keep errors and install/offline state distinct');
+    console.log('PASS Settings retain motion/device preferences without redundant sound or exit controls');
 
     const runningRound = evaluate('ZQApp.game'), storageKey = evaluate('ZQ.STORAGE_KEY');
     const originalWrite = w.Storage.prototype.setItem;
+    const previousCheckpoint = stored().session;
     w.Storage.prototype.setItem = function (key, value) {
-        if (key === storageKey && JSON.parse(value).session !== null) {
+        if (key === storageKey && JSON.stringify(JSON.parse(value).session) !== JSON.stringify(previousCheckpoint)) {
             throw new w.DOMException('No room for the aquarium snapshot', 'QuotaExceededError');
         }
         return originalWrite.call(this, key, value);
@@ -939,14 +967,14 @@ try {
         assert.equal(evaluate('ZQApp.game'), runningRound, 'Failed Save & Return abandoned the live round');
         assert(evaluate('ZQApp.game.state.paused'));
         assert.equal(w.document.body.dataset.screen, 'game');
-        assert.equal(stored().session, null);
+        assert.deepEqual(stored().session, previousCheckpoint, 'A failed checkpoint erased the earlier aquarium');
         assert(!$('save-warning').hidden);
         $('menu-button').click();
         w.document.querySelector('[data-menu-action="settings"]').click();
         assert(!$('settings-save-warning').hidden && !$('settings-save-warning').closest('details'));
-        $('setting-volume').value = '37';
-        $('setting-volume').dispatchEvent(new w.Event('input', { bubbles: true }));
-        assert.equal(stored().settings.volume, 0.37, 'A failed session save blocked independent progress writes');
+        $('setting-motion').value = 'full';
+        $('setting-motion').dispatchEvent(new w.Event('change', { bubbles: true }));
+        assert.equal(stored().settings.motion, 'full', 'A failed session save blocked independent preference writes');
         assert(!$('save-warning').hidden && !$('settings-save-warning').hidden,
             'A stats-only write hid a failed session save');
     } finally {
@@ -958,15 +986,125 @@ try {
     assert(stored().session && !$('resume-button').hidden);
     assert($('save-warning').hidden, 'A successful retry did not clear the session-save warning');
     const keptRound = stored().session;
-    $('settings-button').click();
-    $('setting-volume').value = '61';
-    $('setting-volume').dispatchEvent(new w.Event('input', { bubbles: true }));
+    $('sound-button').click();
+    $('dock-volume').value = '61';
+    $('dock-volume').dispatchEvent(new w.Event('input', { bubbles: true }));
     assert.deepEqual(stored().session, keptRound, 'Home preferences replaced the explicitly saved round');
     key('keydown', 'Escape');
     $('resume-button').click();
-    assert.equal(stored().session, null);
+    assert(stored().session, 'Resume discarded the recoverable round');
     assert.equal(evaluate('ZQApp.settings.volume'), 0.61);
     console.log('PASS Failed session saves stay paused and visible; retry saves one round and home preferences preserve it');
+
+    evaluate(`{
+        const g=ZQApp.game;
+        g.state.creature=null;g.state.attacks=[];g.state.disputes=[];g.state.courtships=[];
+        g.state.spawnTimer=90;g.state.reproduction.fill(180);g.state.milestone=null;
+        g.state.damage=0;g.state.dirt=0;g.state.tankHealth=100;
+        g.state.fish.forEach(f=>{f.hunger=100;f.health=100;});
+    }`);
+    flushIdle();
+    const checkpointGame = evaluate('ZQApp.game'), originalSnapshot = checkpointGame.snapshot;
+    let snapshotCalls = 0;
+    checkpointGame.snapshot = function () { snapshotCalls++; return originalSnapshot.call(this); };
+    const checkpointElapsed = stored().session.elapsed;
+    pump(760);
+    assert.equal(snapshotCalls, 0, 'Periodic checkpoint cloning ran inside the animation loop');
+    assert.equal(idleJobs.size, 1, 'Automatic checkpoints are missing or queued repeatedly');
+    assert.equal(stored().session.elapsed, checkpointElapsed);
+    flushIdle();
+    assert.equal(snapshotCalls, 1, 'An idle checkpoint rebuilt the tank more than once');
+    assert(stored().session.elapsed > checkpointElapsed);
+    evaluate('ZQ.validateSave(JSON.parse(localStorage.getItem(ZQ.STORAGE_KEY)))');
+    checkpointGame.snapshot = originalSnapshot;
+    const recoverable = stored().session;
+    w.Storage.prototype.setItem = function (key, value) {
+        if (key === storageKey && JSON.parse(value).session?.elapsed > recoverable.elapsed) {
+            throw new w.DOMException('Checkpoint storage unavailable', 'QuotaExceededError');
+        }
+        return originalWrite.call(this, key, value);
+    };
+    try {
+        pump(760); flushIdle();
+        assert(!evaluate('ZQApp.game.state.paused'), 'A best-effort checkpoint failure interrupted gameplay');
+        assert.deepEqual(stored().session, recoverable);
+        assert(!$('save-warning').hidden, 'A failed automatic checkpoint was silently ignored');
+        assert.equal(evaluate('ZQApp.save()'), true);
+        assert(!$('save-warning').hidden, 'A cached checkpoint write hid a failed fresh checkpoint');
+    } finally {
+        w.Storage.prototype.setItem = originalWrite;
+    }
+    pump(760); flushIdle();
+    assert($('save-warning').hidden, 'A later successful checkpoint did not clear its warning');
+    assert(stored().session.elapsed > recoverable.elapsed);
+    pump(760);
+    assert.equal(idleJobs.size, 1);
+    let backgroundWrites = 0;
+    w.Storage.prototype.setItem = function (key, value) {
+        if (key === storageKey) backgroundWrites++;
+        return originalWrite.call(this, key, value);
+    };
+    try {
+        w.dispatchEvent(new w.Event('pagehide'));
+        w.document.dispatchEvent(new w.Event('freeze'));
+        assert.equal(backgroundWrites, 1, 'Overlapping lifecycle events duplicate expensive checkpoint writes');
+        assert.equal(idleJobs.size, 0, 'Backgrounding left a stale automatic save scheduled');
+        assert(stored().session.paused);
+    } finally {
+        w.Storage.prototype.setItem = originalWrite;
+    }
+    w.dispatchEvent(new w.Event('pageshow'));
+    $('pause-button').click();
+    console.log('PASS Checkpoints are paced outside rendering, failures leave play and prior saves intact, retries recover, and background writes deduplicate');
+
+    const idleSchedule = w.requestIdleCallback, idleCancel = w.cancelIdleCallback, timeoutSchedule = w.setTimeout;
+    let fallbackCheckpoint;
+    delete w.requestIdleCallback; delete w.cancelIdleCallback;
+    w.setTimeout = function (callback, delay, ...args) {
+        if (delay === 0) { fallbackCheckpoint = callback; return 999999; }
+        return timeoutSchedule.call(this, callback, delay, ...args);
+    };
+    try {
+        pump(760);
+        assert.equal(typeof fallbackCheckpoint, 'function', 'Browsers without idle callbacks have no checkpoint fallback');
+        const beforeFallback = stored().session.elapsed;
+        fallbackCheckpoint();
+        assert(stored().session.elapsed > beforeFallback);
+    } finally {
+        w.requestIdleCallback = idleSchedule; w.cancelIdleCallback = idleCancel; w.setTimeout = timeoutSchedule;
+    }
+    console.log('PASS Checkpoints fall back to a separate timer task when idle callbacks are unavailable');
+
+    pump(760);
+    assert.equal(idleJobs.size, 1);
+    const staleCheckpoint = [...idleJobs.values()][0];
+    returnHome();
+    assert.equal(idleJobs.size, 0, 'Save & Return left a checkpoint queued for the abandoned game');
+    const resumeCheckpoint = stored().session;
+    w.Storage.prototype.setItem = function () { throw new w.DOMException('Storage full', 'QuotaExceededError'); };
+    try {
+        $('resume-button').click();
+        assert(!$('save-warning').hidden);
+    } finally {
+        w.Storage.prototype.setItem = originalWrite;
+    }
+    assert.equal(evaluate('ZQApp.save()'), true);
+    assert.deepEqual(stored().session, resumeCheckpoint, 'A failed initial resume checkpoint erased the previous one');
+    assert(!$('save-warning').hidden, 'A cached resume write hid the failed fresh checkpoint');
+    returnHome();
+    $('begin-button').click();
+    const initialCheckpoint = stored().session;
+    staleCheckpoint();
+    assert.deepEqual(stored().session, initialCheckpoint, 'A stale task checkpointed a different aquarium');
+    pump(760);
+    assert.equal(idleJobs.size, 1);
+    evaluate("ZQApp.game.update=()=>ZQApp.game.finish('defeat','Your last fish was lost.')");
+    pump(1);
+    assert.equal(idleJobs.size, 0, 'Completing a round left a pending checkpoint');
+    assert.equal(stored().session, null, 'Completing a round left a resumable aquarium');
+    key('keydown', 'Escape');
+    $('begin-button').click();
+    console.log('PASS Returning home and completing rounds cancel pending saves; stale tasks cannot replace a new tank');
 
     const newerSave = JSON.stringify({ ...stored(), writer: 'another-window' });
     w.localStorage.setItem(storageKey, newerSave);

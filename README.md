@@ -105,7 +105,7 @@ the hosted website, and different browsers can have separate progress.
   keep rising and fade without becoming saved progress.
 - **The existing game**: a starting score of 100 and two fish; 0.5 points per
   healthy adult per second; the health streak, 20 one-time achievements, five
-  victory milestones, care costs, repeatable bonuses, dangerous visitors, and
+  milestone celebrations, care costs, repeatable bonuses, dangerous visitors, and
   optional Zen care.
 - **Synthesized sound**: filtered water, theme-specific pads and melodies, subtle
   stereo positioning, procedural reverberation, and gentle event sounds. Sound
@@ -124,10 +124,13 @@ the hosted website, and different browsers can have separate progress.
 - **A quiet interface**: one compact status control and a collapsible command
   bar: Feed, Clean, Add fish, Pause/Resume, Zen care, and Volume.
   A small chevron hides the bar without pausing the aquarium. Menu lives in the
-  upper right and opens a non-modal flyout for residents, progress, camera
-  buttons, prizes, settings, and the field guide. Menu's child panels stay
+  upper right and opens a non-modal flyout for the field guide, Settings,
+  Immerse, Camera, and **Save & Return**. Camera groups orbit, angle, zoom,
+  reset, and stop-following controls. Menu's child panels stay
   anchored beneath the same upper-right button. Health-widget panels and their
   child screens stay beneath the upper-left health widget.
+  The status control opens **Your aquarium**, with Residents, Tank prizes,
+  Recent moments, and a collapsed **How scoring works** reference.
   The start page has persistent top and bottom rails in every orientation.
   **Zenquarium 3D** and **A little world. A deeper calm.** sit at the upper left,
   with the guide, sound, and Settings controls at the upper right. Clicking the
@@ -151,8 +154,9 @@ the hosted website, and different browsers can have separate progress.
   **Resume last session** appears only when an aquarium is saved and always
   returns to that aquarium, regardless of the preview selection.
   Start opens the selected world directly; Resume keeps the saved aquarium.
-  Starting or resuming consumes the saved slot. Use **Save & Return** again to
-  keep the running aquarium; ordinary closing or reloading does not keep it.
+  Starting or resuming creates an initial checkpoint; paced automatic saves
+  and pause/background checkpoints preserve a recent aquarium best effort.
+  **Save & Return** requires a successful fresh save before leaving the tank.
   Starting anew records the previous session while preserving
   achievements and best scores. The in-tank dock uses a single compact icon-and-label row without
   secondary descriptions, retaining 44-pixel touch targets and clear water
@@ -163,7 +167,9 @@ the hosted website, and different browsers can have separate progress.
   residents, status, settings, the field guide, prizes, and confirmations.
   Panels and flyouts use outside-tap/Escape dismissal without redundant close
   icons. Cancel remains available for confirmations.
-  **Settings** keeps sound, volume, and motion preferences up front.
+  The start-page sound control and in-tank Volume button share one mute/volume
+  flyout. Muting keeps the selected volume. **Settings** starts with Motion
+  and contains no duplicate audio controls or session-ending actions.
   **Display & battery** is collapsed by default and contains visual quality,
   supported screen-awake/fullscreen controls, and renderer details.
   Automatic quality is the default recommendation; existing preferences remain
@@ -171,7 +177,14 @@ the hosted website, and different browsers can have separate progress.
   installation from an offline-ready copy. Saving failures, recovery actions,
   and graphics fallback notices stay outside collapsed sections.
   Routine discoveries and bonuses accumulate in **Recent moments**, rather
-  than repeated popups. Feed, clean, orbit, or defend a resident without
+  than repeated popups. Brief notifications share a vertically centered top row
+  with the status and menu controls, centered in the space between them.
+  Small portrait screens (up to 600 pixels wide) use a wider, centered second
+  message row below the controls. Other exceptionally cramped layouts also
+  move messages below the controls rather than overlap.
+  Saving warnings stay separate above the row. Milestones use the same message
+  area and fade after 4.5 seconds; ignoring them never pauses play or blocks later
+  milestones. Feed, clean, orbit, or defend a resident without
   dismissing a tray. Critical care remains available alongside non-interactive,
   creature-specific defense hints.
 - **A stable habitat**: deterministic scenery is shared by rendering and
@@ -231,22 +244,24 @@ the hosted website, and different browsers can have separate progress.
 | Drop food | Tap Feed, then click/tap the water; double-tap Feed for a normal drop. Keyboard: `F`, then arrows/`Enter`; `Escape` cancels |
 | Clean / add fish | Dock buttons; `C`, `B` |
 | Menu | Menu button; `M` |
-| Pause / resume | Menu; `Space` when not activating another focused control |
-| Orbit / elevate camera | Drag; arrow keys; camera buttons in Menu |
-| Zoom | Pinch, wheel, `+` / `-`, or Menu camera buttons |
-| Reset camera | Menu; `R` |
-| Inspect / follow | Menu > **Residents & following**; choose **Follow** |
-| Stop following | Menu or status details > **Stop following**; drag to orbit |
-| Status / progress | Compact points-and-condition control; Menu > **Status & progress** |
+| Pause / resume | Command bar; `Space` when not activating another focused control |
+| Orbit / elevate camera | Drag; arrow keys; Menu > **Camera** |
+| Zoom | Pinch, wheel, `+` / `-`, or Menu > **Camera** |
+| Reset camera | Menu > **Camera**; `R` |
+| Inspect / follow | Aquarium dashboard > **Residents**; choose **Follow** |
+| Stop following | Menu > **Camera** > **Stop following**; drag to orbit |
+| Status / progress | Compact points-and-condition control opens **Your aquarium** |
 | Fend off jellyfish, squid, or octopus | Press on it, drag outward, release; three swipes. Keyboard: `X` |
 | Defend against a crab | Press on it and alternate left/right swipes three times. Keyboard: `J`, `L`, `J` (or `L`, `J`, `L`) |
 | Defend against an eel | Press and hold on it for 0.7 seconds during its 2.6-second coil warning. Keyboard: hold `H` |
-| Tank prizes | Menu; `T`; or the field guide's **Tank prizes** tab |
+| Tank prizes | Aquarium dashboard > **Tank prizes**; `T` |
 | Enjoy a placed prize | Tap it in the water, or **Enjoy this prize** in its tray |
 | Move a prize | Drag it along the sand, or choose **Move** in its tray, use arrows, and `Enter`; `Escape` cancels |
 | Tap glass | Click or tap the aquarium, including directly over a fish; `G` for keyboard; no tray or dialog |
 | Immerse / exit | Menu > **Immerse**; `I`; visible exit button or `Escape` |
-| Help, discoveries, audio, saves | Menu > **Field guide**, **Recent moments**, or **Settings** |
+| Help and discoveries | Menu > **Field guide**; aquarium dashboard > **Recent moments** |
+| Sound and volume | Shared start-page Sound or command-bar Volume flyout |
+| Save and exit | Menu or pause card > **Save & Return** |
 
 Routine trays do **not** stop simulation, mute audio, cover the aquarium with a
 backdrop, or trap keyboard focus. The fish catalog is a separate light-dismiss,
@@ -256,9 +271,9 @@ the glass. Fish inspectors show live activity, health, fullness,
 growth, and new arrivals. Status details and discoveries also refresh in place. Trays
 leave space for care warnings and small, non-interactive creature hints, including on phones.
 Explicit pause and confirmation dialogs stop simulation and audio.
-Milestones appear as compact nonblocking notices: Continue dismisses the notice,
-and Stop ends the round with a victory in one click. The aquarium and audio
-continue while the notice is showing. Dialogs and live trays support outside-tap
+Milestones appear in the usual top message area and fade without a Stop or
+Continue prompt. The aquarium and audio continue, and later milestones remain
+available even if the notices are ignored. Dialogs and live trays support outside-tap
 dismissal without accidentally interacting with the tank underneath; Escape and
 close buttons remain available. The catalog, all in-tank menu trays, dialogs,
 and compact score HUD share an 84%-opaque theme-colored panel surface:
@@ -345,6 +360,19 @@ track or cover the creature. Rings, progress dots, and charging cues continue;
 keyboard equivalents remain available in the guide.
 Gesture feedback belongs to that specific encounter and is cleared when the
 creature changes, a defense succeeds, or the aquarium is paused or restarted.
+
+**Quick defense rewards:** completing the swipes or eel hold immediately earns
+60 points within the first three active seconds of the defense opportunity.
+The reward then drops by two points per second, rounded to whole points, reaching
+a 20-point minimum at 23 seconds, independently of the health-streak multiplier.
+Ordinary visitors start timing when they enter the tank (or when you swipe them
+early); eels start at their first coil, so their approach and mandatory waiting
+period do not penalize you. Pauses freeze the clock, saves retain it, and each
+visitor pays only once. The reward appears in the top message and Recent moments.
+The existing **Creature Whisperer** bonus remains separate: 30 base points when
+the repelled creature physically leaves without a direct crab capture. Ink,
+stinger, and shock losses do not disqualify that older bonus; its usual health
+multiplier still applies.
 
 Every fish loss uses the same departure: it rolls upside down, floats upward,
 then fades and disappears after four active seconds. Both renderers show this,
@@ -477,18 +505,18 @@ or an invulnerability mode.
 ## Device, privacy, and offline behavior
 
 - A versioned, validated localStorage envelope at **`zenquarium_zq3d_v1`** holds
-  settings, discoveries, statistics, and at most one explicitly saved aquarium.
+  settings, discoveries, statistics, and at most one resumable aquarium.
   The stable key still contains schema version 10. Existing valid version-10
   saves remain usable, including their last aquarium. Earlier formats still
   require an explicit **Settings → Reset local progress** rather than migration.
   Unreadable or incompatible data stays untouched until that confirmation.
   Resetting removes only this app's saved aquarium, lifetime stats, and discoveries.
 - **Save & Return** keeps the last aquarium and returns to the start screen.
-  **Resume last session** consumes that saved slot; save explicitly again before
-  leaving if you want to keep playing it later. Starting a new aquarium or
-  finishing a round also clears the slot. Closing or reloading without explicitly
-  saving leaves no resumable round, but does not erase lifetime progress.
-- Explicit session saves include fish traits, growth, hunger, health, destinations, food, visitor
+  **Resume last session** returns to that tank without advancing time while away.
+  Starting a new aquarium records the previous round and replaces its checkpoint;
+  actually completing a round clears the slot.
+  Closing or reloading can resume the most recent successful checkpoint.
+- Aquarium checkpoints include fish traits, growth, hunger, health, destinations, food, visitor
   state, live hazards, seeded randomness, sex, social cooldowns, courtships,
   territorial disputes, breeding timers, and pending milestones.
   Challenge phases, defense progress, prize unlocks, placements, active
@@ -498,16 +526,20 @@ or an invulnerability mode.
   Encounter warnings, defense progress, and electric-pulse hit records persist.
   Active holds are cancelled when pausing or reloading. Social encounters resume
   with their saved phase and remaining intervention window, not wall-clock time.
-- Lifetime progress and preferences save every 12 active seconds, on important
-  actions, and when backgrounding; these writes do not save a running aquarium.
-  A backgrounded tab keeps its paused round in memory until it is closed or
-  reloaded. **Time does not advance while away.**
+- Every 12 active seconds, one deferred checkpoint is scheduled outside the
+  animation callback, using an idle task with a two-second timeout or a timer
+  fallback. Pause and backgrounding checkpoint directly; overlapping lifecycle
+  events are deduplicated. Preference/action writes reuse the cached checkpoint
+  rather than rebuilding the live tank. Automatic saving is best effort:
+  storage failures do not stop play, and abrupt browser/OS termination can lose
+  changes since the last successful checkpoint. **Time does not advance while away.**
 - Returning from the background requires explicit resume. Rendering and sound
   are suspended; screen wake lock is opt-in and released while inactive.
 - Malformed saves are left untouched. Storage denial or capacity errors are
   visible. If **Save & Return** cannot store the round, it stays open and paused,
-  rather than falsely claiming it was saved. A later stats-only write does not
-  hide that failed session save. Concurrent windows pause instead of silently
+  rather than falsely claiming it was saved. A failed checkpoint keeps the
+  previous successful checkpoint; cached preference writes do not hide the
+  warning until a fresh checkpoint succeeds. Concurrent windows pause instead of silently
   overwriting a newer save; reset confirmation also checks for changed data.
 - Quality automatically steps down on slower rendering. Manual High, Balanced,
   and 30-FPS Battery Saver are available. Device reduced-motion preferences are

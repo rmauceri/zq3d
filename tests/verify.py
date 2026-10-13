@@ -105,9 +105,29 @@ def main():
             page.wait_for_function("ZQApp.game && ZQApp.game.state.fish.length === 2")
 
             def menu_action(action, target=page):
+                if action == "score":
+                    if not target.locator("#tray[data-kind='score']").is_visible():
+                        target.keyboard.press("Escape")
+                        target.locator("#score-button").click()
+                    return
+                if action in ["auto", "pause"]:
+                    target.locator("#zen-button" if action == "auto" else "#pause-button").click()
+                    return
+                if action == "sound":
+                    if not target.locator("#volume-mute").is_visible():
+                        target.keyboard.press("Escape")
+                        target.locator("#volume-button").click()
+                    target.locator("#volume-mute").click()
+                    return
                 selector = f'[data-menu-action="{action}"]'
-                if target.locator(selector).count() == 0:
-                    target.locator("#menu-button").click()
+                if not target.locator(selector).is_visible():
+                    target.keyboard.press("Escape")
+                    if action in ["residents", "prizes", "activity"]:
+                        target.locator("#score-button").click()
+                    else:
+                        target.locator("#menu-button").click()
+                        if action in ["orbit", "view", "zoom-in", "zoom-out", "reset", "unfollow"]:
+                            target.locator('[data-menu-action="camera"]').click()
                 target.locator(selector).click()
 
             def shop():
@@ -376,10 +396,10 @@ def main():
                 require(page.evaluate("!!ZQApp.game.state.prizes.lantern"), "Timed hold did not unlock its lantern")
                 screenshot(page, "eel-challenge")
                 page.evaluate("ZQApp.game.state.score = 1000; ZQApp.game.state.stats.born = 1; ZQApp.game.checkPrizes()")
-                page.wait_for_selector("#milestone-continue", timeout=10000)
+                page.wait_for_function("document.getElementById('toast').dataset.kind==='milestone' && !document.getElementById('toast').hidden")
                 page.keyboard.press("Escape")
                 require(page.evaluate("!document.getElementById('panel').open && !ZQApp.game.state.paused"), "Milestone blocked the aquarium")
-                page.locator("#milestone-continue").click()
+                require(page.evaluate("!ZQApp.game.state.milestone"), "Ignoring the milestone blocked later progression")
                 menu_action("prizes")
                 require(page.evaluate("Object.keys(ZQApp.game.state.prizes).length") == 4, "Not all four prize conditions worked")
                 for prize in page.evaluate("ZQApp.game.state.equippedPrizes.slice()"):

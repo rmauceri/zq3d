@@ -17,6 +17,7 @@ const ZQ = (() => {
         crabDefenses: 3, decoyCooldown: 0.35, eelWarning: 2.6, eelDash: 1.2,
         eelSpeed: 4.8, prizeLimit: 3, prizeInteraction: 6,
         encounterWarning: 2.8, encounterRest: 6, repelSwipes: 3,
+        defenseRewardMin: 20, defenseRewardMax: 60, defenseRewardGrace: 3, defenseRewardDecay: 2,
         eelHold: 0.7, shockRadius: 2.4, shockLife: 1.2, deathLife: 4,
         crabDash: 1.2, crabSpeed: 5.2, crabDirt: 5, stingerLength: 1.1, stingerRadius: 0.12,
         schoolRadius: 2.2, schoolAlignment: 0.42, schoolCohesion: 0.16,
@@ -552,7 +553,12 @@ const ZQ = (() => {
                 const breedingCap = this.state.auto ? Math.min(CONFIG.autoCap, this.state.maxFish) : this.state.maxFish;
                 const breedingLimit = CONFIG.birthCooldown[1] * (1 + 2 * this.state.fish.length / breedingCap);
                 this.state.reproduction = this.state.reproduction.map(n => Math.min(n, breedingLimit));
-                if (this.state.creature) this.state.creature.holdCharge = 0;
+                if (this.state.creature) {
+                    this.state.creature.holdCharge = 0;
+                    if (!Object.hasOwn(this.state.creature, 'defenseStartedAt')) {
+                        this.state.creature.defenseStartedAt = this.state.creature.entered ? 0 : null;
+                    }
+                }
                 this.state.paused = true;
                 this.habitat = createHabitat(themeId, this.state.bounds, this.state.equippedPrizes, this.state.prizePositions);
                 this.clearHabitatOverlaps();
@@ -844,7 +850,7 @@ const ZQ = (() => {
             return f;
         }
         award(amount, message, type = 'bonus') {
-            const applied = amount > 0 ? amount * this.state.multiplier : amount;
+            const applied = amount > 0 && type !== 'defended' ? amount * this.state.multiplier : amount;
             this.state.score = Math.max(0, this.state.score + applied);
             if (message) this.emit(type, message, { amount: applied });
             return applied;
@@ -985,6 +991,7 @@ const ZQ = (() => {
                 }
                 c.lastLure = side;
             } else c.defenseStep++;
+            c.defenseStartedAt ??= c.age;
             c.decoyCooldown = CONFIG.decoyCooldown;
             c.flee = 0.8;
             c.direction = side || (c.pos[0] >= 0 ? 1 : -1);
@@ -1007,6 +1014,9 @@ const ZQ = (() => {
             this.heldCreature = null;
         }
         repelChallenge(c) {
+            if (!this.actionable() || !c || c !== this.state.creature || c.defended) return;
+            const delay = Math.max(0, c.age - (c.defenseStartedAt ?? c.age) - CONFIG.defenseRewardGrace);
+            const reward = Math.round(Math.max(CONFIG.defenseRewardMin, CONFIG.defenseRewardMax - delay * CONFIG.defenseRewardDecay));
             c.defended = true;
             c.phase = 'leaving';
             c.flee = 12;
@@ -1017,7 +1027,7 @@ const ZQ = (() => {
                 const stat = c.kind === 'crab' ? 'crabsRepelled' : 'eelsRepelled';
                 this.profile.stats[stat]++; this.state.stats[stat]++;
             }
-            this.emit('defended', `${c.name} is leaving. Your aquarium is safe for now.`);
+            this.award(reward, `${c.name} chased away!`, 'defended');
             this.checkPrizes();
         }
         checkPrizes() {
@@ -1180,6 +1190,7 @@ const ZQ = (() => {
                 flee: 0, provoked: false, eaten: 0, entered: false, yaw: direction > 0 ? 0 : Math.PI,
                 phase: 'stalk',
                 phaseTimer: CONFIG.encounterRest, defenseStep: 0, lastLure: 0, decoyCooldown: 0, holdCharge: 0,
+                defenseStartedAt: null,
                 defended: false, targetId: null, targetPoint: null
             };
             if (def.kind === 'crab' || def.kind === 'eel') {
@@ -1570,6 +1581,7 @@ const ZQ = (() => {
         }
         advanceEncounter(c, dt, fullyInside) {
             if (c.defended || !c.entered) return;
+            if (c.kind !== 'eel' || c.phase === 'windup') c.defenseStartedAt ??= c.age;
             if (c.kind === 'eel' && c.phase === 'windup' && this.heldCreature === c) {
                 c.holdCharge = Math.min(CONFIG.eelHold, c.holdCharge + dt);
                 // The warning must still be live when charging completes.
@@ -1588,6 +1600,7 @@ const ZQ = (() => {
                 c.targetId = prey.id; c.targetPoint = [...prey.pos];
                 c.phase = 'windup';
                 c.phaseTimer = c.kind === 'eel' ? CONFIG.eelWarning : CONFIG.encounterWarning;
+                if (c.kind === 'eel') c.defenseStartedAt ??= c.age;
                 this.emit('challenge', `${c.name} is preparing to attack.`, { creature: true });
             } else if (c.phase === 'windup' && c.phaseTimer === 0) {
                 if (c.kind === 'crab') {
@@ -2083,7 +2096,6 @@ const ZQ = (() => {
         }
         continueMilestone() {
             if (!this.state.milestone) return this.reject('There is no milestone waiting.');
-            this.endCreatureHold();
             this.state.milestone = null;
             return { ok: true };
         }
@@ -2306,6 +2318,9 @@ const ZQ = (() => {
             vector(c.pos, 'visitor position');
             if (![1, -1].includes(c.direction)) fail('visitor direction');
             num(c.age, 0, 1e9, 'visitor age'); num(c.cooldown, 0, 8, 'visitor cooldown');
+            if (Object.hasOwn(c, 'defenseStartedAt') && c.defenseStartedAt !== null) {
+                num(c.defenseStartedAt, 0, c.age, 'visitor defense start');
+            }
             num(c.taps, 0, 3, 'visitor taps'); num(c.lastTap, -10, s.elapsed, 'visitor tap time');
             num(c.flee, 0, 12, 'visitor escape'); num(c.eaten, 0, 100, 'visitor appetite');
             num(c.yaw, -4, 4, 'visitor heading');

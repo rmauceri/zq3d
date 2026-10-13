@@ -232,6 +232,27 @@ try:
                 }""")
                 page.keyboard.press("Escape")
                 assert page.locator("#about-button").evaluate("button => button===document.activeElement"), "Closing About lost branding focus"
+                page.locator("#sound-button").click()
+                page.evaluate("""() => {
+                    const tray=document.getElementById('tray'), box=tray.getBoundingClientRect();
+                    const trigger=document.getElementById('sound-button').getBoundingClientRect();
+                    if(tray.dataset.anchor!=='sound' || box.top<trigger.bottom ||
+                       box.top-trigger.bottom>12 || box.left<0 || box.right>innerWidth || box.bottom>innerHeight)
+                        throw Error('Home sound flyout does not fit below its rail trigger');
+                    for(const node of tray.querySelectorAll('button,input')) {
+                        const r=node.getBoundingClientRect();
+                        if(r.width<44 || r.height<44) throw Error('Small shared sound touch target');
+                    }
+                    if(document.getElementById('sound-button').getAttribute('aria-expanded')!=='true')
+                        throw Error('Open sound flyout is not announced');
+                }""")
+                page.locator("#dock-volume").fill("37")
+                volume_before = page.evaluate("ZQApp.settings.volume")
+                page.locator("#volume-mute").click()
+                page.locator("#volume-mute").click()
+                assert page.evaluate("ZQApp.settings.volume") == volume_before
+                page.keyboard.press("Escape")
+                assert page.locator("#sound-button").evaluate("button => button===document.activeElement")
             page.emulate_media(reduced_motion="no-preference")
             page.mouse.move(0, 0)
             tile = page.locator(".theme-option").first
@@ -285,19 +306,20 @@ try:
             page.locator("#resume-button").click()
             kept_profile = page.evaluate("""() => {
                 window.dispatchEvent(new Event('pagehide'));
-                if(JSON.parse(localStorage.getItem(ZQ.STORAGE_KEY)).session!==null)
-                    throw Error('Resuming or backgrounding automatically saved the live aquarium');
+                const checkpoint=JSON.parse(localStorage.getItem(ZQ.STORAGE_KEY)).session;
+                if(!checkpoint || !checkpoint.paused || checkpoint.themeId!==ZQApp.game.theme.id)
+                    throw Error('Backgrounding did not checkpoint the paused aquarium');
                 return JSON.stringify(ZQApp.profile);
             }""")
             page.reload()
             page.wait_for_function("typeof ZQApp!=='undefined' && !document.getElementById('begin-button').disabled")
-            assert page.locator("#resume-button").is_hidden()
+            assert page.locator("#resume-button").is_visible()
             assert page.evaluate("ZQApp.game===null")
             assert page.evaluate("JSON.stringify(ZQApp.profile)") == kept_profile
             page.locator("#begin-button").click()
             page.locator("#pause-button").click()
             page.locator("#pause-home-button").click()
-            print("PASS Explicitly saved rounds survive reload; ordinary reload keeps lifetime progress but no running round", flush=True)
+            print("PASS Explicit and background checkpoints survive reload without advancing away time", flush=True)
             page.locator("[data-theme='deep']").click()
             page.locator("#begin-button").click()
             page.evaluate("""() => {
@@ -323,8 +345,13 @@ try:
                     if(selector==='#tray' && panel.dataset.kind!=='volume') {
                         const health=panel.dataset.anchor==='health';
                         const anchor=document.querySelector(health?'.game-hud':'#menu-button').getBoundingClientRect();
+                        const notice=document.getElementById('toast');
+                        const controls=['.game-hud','#menu-button','#exit-immersion']
+                            .map(s=>document.querySelector(s)).filter(n=>n.getClientRects().length);
+                        const rowBottom=Math.max(anchor.bottom,notice.hidden?0:notice.getBoundingClientRect().bottom,
+                            ...controls.map(n=>n.getBoundingClientRect().bottom));
                         check(Math.abs(health?box.left-anchor.left:box.right-anchor.right)<=1 &&
-                              box.top>=anchor.bottom && box.top-anchor.bottom<=12,
+                              box.top>=rowBottom && box.top-rowBottom<=12,
                               'Panel is not anchored below its originating widget');
                     }
                     check(body.clientHeight>=50,'no usable scrolling body');
@@ -332,18 +359,55 @@ try:
                     const buttons=[...panel.querySelectorAll('button,select,input,summary')].filter(b=>!b.hidden && b.getClientRects().length);
                     for(const button of buttons) {
                         const r=button.getBoundingClientRect();
-                        check(r.height>=44 && r.width>=44,'small touch target '+(button.id||button.textContent));
+                        const nativeDesktopCheckbox=innerWidth>1100 && button.matches('input[type="checkbox"]');
+                        check(nativeDesktopCheckbox || r.height>=44 && r.width>=44,'small touch target '+(button.id||button.textContent));
                     }
                     body.scrollTop=body.scrollHeight;
                     if(body.scrollHeight>body.clientHeight) check(body.scrollTop>0,'cannot scroll to last content');
                     body.scrollTop=0;
                 };
+                window.checkTopToast = () => {
+                    const toast=document.getElementById('toast'), box=toast.getBoundingClientRect();
+                    const tank=document.getElementById('viewport').getBoundingClientRect();
+                    let left=tank.left+12,right=tank.right-12;
+                    const controls=['.game-hud','#menu-button','#exit-immersion']
+                        .map(s=>document.querySelector(s)).filter(n=>n.getClientRects().length)
+                        .map(n=>n.getBoundingClientRect());
+                    const health=document.querySelector('.game-hud');
+                    if(health.getClientRects().length) left=Math.max(left,health.getBoundingClientRect().right+8);
+                    for(const selector of ['#menu-button','#exit-immersion']) {
+                        const node=document.querySelector(selector);
+                        if(node.getClientRects().length) right=Math.min(right,node.getBoundingClientRect().left-8);
+                    }
+                    const shared=right-left>=90 && !matchMedia('(max-width: 600px) and (orientation: portrait)').matches;
+                    const center=shared?(left+right)/2:(tank.left+tank.right)/2;
+                    if(toast.hidden || Math.abs((box.left+box.right)/2-center)>1 ||
+                       box.top<tank.top || box.top>tank.top+150 || box.left<tank.left || box.right>tank.right)
+                        throw Error('Notification is not centered in the available top space');
+                    for(const control of controls) {
+                        if(Math.abs((control.top+control.bottom)/2-(controls[0].top+controls[0].bottom)/2)>1)
+                            throw Error('Top controls are not middle aligned');
+                        if(shared && Math.abs((control.top+control.bottom)/2-(box.top+box.bottom)/2)>1)
+                            throw Error('Top controls and notification are not middle aligned');
+                        if(!shared && box.top<control.bottom+7)
+                            throw Error('Narrow-layout notification covers a top control');
+                    }
+                    if(shared && (box.left<left-1 || box.right>right+1)) throw Error('Notification overlaps a top control');
+                    const warning=document.getElementById('save-warning');
+                    if(!warning.hidden && box.top<warning.getBoundingClientRect().bottom+7)
+                        throw Error('Notification covers a saving warning');
+                };
             }""")
-            for width, height in [(320, 480), (412, 915), (568, 320), (915, 412), (800, 1280), (1024, 768)]:
+            for width, height in [(320, 480), (412, 915), (600, 960), (568, 320), (915, 412), (800, 1280), (1024, 768), (1440, 900)]:
                 page.set_viewport_size({"width": width, "height": height})
                 page.wait_for_timeout(200)
-                page.evaluate("ZQApp.game.state.creature=null; ZQApp.game.state.attacks=[]; ZQApp.game.state.spawnTimer=999; ZQApp.game.state.score=500")
+                page.evaluate("""() => {
+                    const s=ZQApp.game.state;
+                    s.creature=null;s.attacks=[];s.spawnTimer=90;s.score=500;s.reproduction.fill(180);
+                    s.fish.forEach(f=>{f.hunger=100;f.health=100;});
+                }""")
                 page.locator("#menu-button").click()
+                assert page.locator("#tray [data-menu-action]").count() == 5
                 page.evaluate("""() => {
                     checkCompactPanel('#tray');
                     const menu=document.getElementById('tray').getBoundingClientRect();
@@ -353,21 +417,34 @@ try:
                 }""")
                 page.locator("#menu-button").click()
                 page.locator("#score-button").click()
-                page.evaluate("checkCompactPanel('#tray')")
-                for action in ["residents", "activity"]:
+                page.evaluate("""() => {
+                    checkCompactPanel('#tray');
+                    if(document.querySelector('#tray details').open) throw Error('Scoring reference is not collapsed');
+                }""")
+                for action in ["residents", "prizes", "activity"]:
                     page.locator(f"[data-menu-action='{action}']").click()
                     page.evaluate("checkCompactPanel('#tray')")
                     page.keyboard.press("Escape")
                     page.locator("#score-button").click()
                 page.locator("#menu-button").click()
                 page.evaluate("checkCompactPanel('#tray')")
-                page.locator("[data-menu-action='score']").click()
+                page.locator("[data-menu-action='camera']").click()
                 page.evaluate("""() => {
                     checkCompactPanel('#tray');
                     if(document.getElementById('tray').dataset.anchor!=='menu')
-                        throw Error('Status from Menu inherited an old health anchor');
+                        throw Error('Camera from Menu inherited an old health anchor');
                 }""")
                 page.keyboard.press("Escape")
+                page.evaluate("ZQApp.game.emit('birth','A little life joins your aquarium.',{amount:10})")
+                page.wait_for_function("!document.getElementById('toast').hidden && document.getElementById('toast').textContent==='A little life joins your aquarium. +10 pts'")
+                page.evaluate("checkTopToast()")
+                if ARTIFACTS and width in [320, 568, 1024]:
+                    page.screenshot(path=str(ARTIFACTS / f"top-notification-{width}x{height}.png"))
+                page.locator("#menu-button").click()
+                page.locator("[data-menu-action='immerse']").click()
+                page.evaluate("checkTopToast()")
+                page.locator("#exit-immersion").click()
+                page.evaluate("checkTopToast()")
                 page.locator("#shop-button").click()
                 page.evaluate("""() => {
                     checkCompactPanel('#catalog');
@@ -414,14 +491,20 @@ try:
                 }""")
                 page.locator("#zen-button").click()
                 for action in ["residents", "score", "prizes", "settings", "journal", "activity"]:
-                    page.locator("#menu-button").click()
-                    page.locator(f"[data-menu-action='{action}']").click()
+                    if action in ["residents", "score", "prizes", "activity"]:
+                        page.locator("#score-button").click()
+                        if action != "score":
+                            page.locator(f"[data-menu-action='{action}']").click()
+                    else:
+                        page.locator("#menu-button").click()
+                        page.locator(f"[data-menu-action='{action}']").click()
                     page.evaluate("checkCompactPanel('#tray')")
                     if action == "settings":
                         assert page.locator("#tray-title").inner_text() == "Settings"
                         assert not page.locator("#settings-display").evaluate("section => section.open")
                         assert not page.locator("#setting-motion").evaluate("control => !!control.closest('details')")
                         assert page.locator("#export-button, #import-button, #import-file").count() == 0
+                        assert page.locator("#setting-sound, #setting-volume, #end-session-button, #save-home-button").count() == 0
                         page.locator("#settings-display > summary").click()
                         page.evaluate("checkCompactPanel('#tray')")
                         page.locator("#settings-install > summary").click()
@@ -430,15 +513,10 @@ try:
                         page.locator("[data-tab='achievements']").click()
                         page.evaluate("checkCompactPanel('#tray')")
                     page.keyboard.press("Escape")
-                page.locator("#menu-button").click()
-                page.locator("[data-menu-action='settings']").click()
-                page.locator("#end-session-button").click()
-                page.evaluate("checkCompactPanel('#panel')")
-                page.locator("#cancel-action").click()
                 page.locator("#pause-button").click()
                 page.evaluate("""() => {
                     const pause=document.getElementById('pause-card').getBoundingClientRect();
-                    if(pause.width>322 || pause.top<0 || pause.bottom>innerHeight)
+                    if(pause.width>(innerWidth<=1100?322:382) || pause.top<0 || pause.bottom>innerHeight)
                         throw Error('Pause card does not fit small screen');
                     if(document.getElementById('unpause-button').getBoundingClientRect().height<44)
                         throw Error('Pause resume is too small');
@@ -454,26 +532,103 @@ try:
                         throw Error('Catalog covers critical water care');
                 }""")
                 page.keyboard.press("Escape")
+                page.evaluate("ZQApp.game.emit('birth','A baby joins your aquarium.',{amount:10})")
+                page.wait_for_function("!document.getElementById('toast').hidden && document.getElementById('toast').textContent==='A baby joins your aquarium. +10 pts'")
+                page.evaluate("checkTopToast()")
                 page.evaluate("ZQApp.game.state.damage=0; ZQApp.game.state.tankHealth=100")
                 page.wait_for_timeout(250)
-                print(f"PASS Compact catalog, residents, score, prizes, settings, guide, discoveries and confirmation at {width}x{height}", flush=True)
+                page.evaluate("""() => {
+                    window.originalStorageWrite=Storage.prototype.setItem;
+                    Storage.prototype.setItem=function() {throw new DOMException('Storage full','QuotaExceededError');};
+                }""")
+                page.locator("#pause-button").click()
+                page.evaluate("""() => {
+                    checkTopToast();
+                    const warning=document.getElementById('save-warning').getBoundingClientRect();
+                    const menu=document.getElementById('menu-button').getBoundingClientRect();
+                    if(menu.top<warning.bottom+7) throw Error('Saving warning blocks access to Menu');
+                    Storage.prototype.setItem=window.originalStorageWrite;
+                }""")
+                page.locator("#menu-button").click()
+                page.locator("[data-menu-action='settings']").click()
+                page.evaluate("checkCompactPanel('#tray')")
+                page.keyboard.press("Escape")
+                page.locator("#pause-button").click()
+                page.locator("#pause-button").click()
+                assert page.locator("#save-warning").is_hidden()
+                page.locator("#unpause-button").click()
+                print(f"PASS Compact catalog, dashboard, camera, settings, guide and discoveries at {width}x{height}", flush=True)
             page.locator("#score-button").click()
             for width, height in [(568, 320), (412, 915), (1440, 900)]:
                 page.set_viewport_size({"width": width, "height": height})
                 page.wait_for_timeout(250)
                 page.evaluate("checkCompactPanel('#tray')")
             page.keyboard.press("Escape")
+            for score, title, size in [(1000,"Bronze",(320,480)),(2500,"Silver",(1440,900)),
+                                       (5000,"Gold",(568,320)),(10000,"Platinum",(412,915))]:
+                page.set_viewport_size({"width":size[0],"height":size[1]})
+                page.evaluate("""score => {
+                    const s=ZQApp.game.state;
+                    s.creature=null;s.attacks=[];s.spawnTimer=90;s.reproduction.fill(180);
+                    s.score=score;s.damage=0;s.dirt=0;s.tankHealth=100;
+                    s.fish.forEach(f=>{f.hunger=100;f.health=100;});
+                }""",score)
+                elapsed=page.evaluate("ZQApp.game.state.elapsed")
+                page.wait_for_function("""title => {
+                    const t=document.getElementById('toast');
+                    return !t.hidden && t.dataset.kind==='milestone' && t.textContent.includes(title);
+                }""",arg=title)
+                page.evaluate("checkTopToast()")
+                if ARTIFACTS:
+                    page.screenshot(path=str(ARTIFACTS / f"milestone-{title.lower()}-{size[0]}x{size[1]}.png"))
+                page.wait_for_function("document.getElementById('toast').classList.contains('fading')",timeout=5500)
+                page.wait_for_function("""() => {
+                    const opacity=Number(getComputedStyle(document.getElementById('toast')).opacity);
+                    return opacity>0 && opacity<0.8;
+                }""",timeout=1000)
+                page.wait_for_function("document.getElementById('toast').hidden",timeout=1500)
+                assert page.evaluate("!ZQApp.game.state.paused && !ZQApp.game.state.ended && !ZQApp.game.state.milestone")
+                assert page.evaluate("ZQApp.game.state.elapsed")>elapsed+4
+            print("PASS Bronze, Silver, Gold and Platinum fade in the shared top row while ignored milestones keep progressing",flush=True)
             page.set_viewport_size({"width": 1024, "height": 768})
             page.wait_for_timeout(250)
-            page.locator("#menu-button").click()
-            page.locator("[data-menu-action='settings']").click()
-            page.locator("#end-session-button").click()
-            page.locator("#confirm-action").click()
+            page.evaluate("ZQApp.game.state.fish=[]; ZQApp.game.state.timers.empty=ZQ.CONFIG.emptyGrace")
+            page.wait_for_function("document.getElementById('panel').open")
             for width, height in [(412, 915), (568, 320)]:
                 page.set_viewport_size({"width": width, "height": height})
                 page.wait_for_timeout(200)
                 page.evaluate("checkCompactPanel('#panel')")
             print("PASS Session summary remains compact and scrollable in portrait and landscape", flush=True)
+            checkpoint_cost = page.evaluate("""() => {
+                const g=new ZQ.Game('deep', structuredClone(ZQApp.profile), {seed:123,width:1440,height:900});
+                g.state.score=10000;
+                while(g.state.fish.length<g.state.maxFish) g.addFish(g.state.fish.length%4);
+                for(let i=0;i<20;i++) g.feed();
+                for(let i=0;i<40;i++) g.emit('birth','A little life joins your aquarium.',{amount:10});
+                g.spawnCreature();
+                const data={version:ZQ.VERSION,savedAt:new Date().toISOString(),writer:'layout-check',
+                    profile:g.profile,settings:ZQApp.settings,session:g.snapshot()};
+                ZQ.validateSave(data);
+                const timings=[];
+                const key='zq3d-checkpoint-timing';
+                const prior=localStorage.getItem(key);
+                let text;
+                try {
+                    for(let i=0;i<25;i++) {
+                        const start=performance.now();
+                        data.session=g.snapshot();
+                        text=JSON.stringify(data);
+                        localStorage.setItem(key,text);
+                        timings.push(performance.now()-start);
+                    }
+                } finally {
+                    if(prior===null) localStorage.removeItem(key); else localStorage.setItem(key,prior);
+                }
+                timings.sort((a,b)=>a-b);
+                return {residents:g.state.fish.length,food:g.state.food.length,bytes:new Blob([text]).size,
+                    medianMs:timings[12],maxMs:timings[24]};
+            }""")
+            print(f"Desktop Edge checkpoint cost (not a phone guarantee): {checkpoint_cost}", flush=True)
             fallback = browser.new_context(viewport={"width": 320, "height": 480})
             try:
                 fallback.add_init_script("""{
@@ -488,10 +643,13 @@ try:
                 canvas_page.wait_for_function("typeof ZQApp !== 'undefined' && ZQApp.renderer && !ZQApp.renderer.is3D")
                 canvas_page.locator('[data-theme="koi"]').click()
                 assert canvas_page.locator("#scene-name").inner_text() == "Koi Pond"
-                assert canvas_page.locator("#scene-description").is_visible()
+                assert "Koi Pond" in canvas_page.locator("#scene-caption").inner_text()
+                canvas_page.locator("#sound-button").click()
+                assert canvas_page.locator("#dock-volume").is_visible()
+                canvas_page.keyboard.press("Escape")
                 canvas_page.locator("#begin-button").click()
                 assert not canvas_page.locator("#scene-caption").is_visible()
-                print("PASS Canvas fallback initializes without the removed renderer badge and keeps the welcome caption", flush=True)
+                print("PASS Canvas fallback keeps accessible theme information and the shared sound flyout", flush=True)
             finally:
                 fallback.close()
             assert not errors, errors

@@ -11,7 +11,7 @@ const ZQApp = (() => {
     const number = value => Math.floor(value).toLocaleString();
     const duration = seconds => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
     const safeText = text => String(text).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-    const PARAMS = { autosave: 12, hudInterval: 0.2, tapTravel: 8, tapDuration: 650, toastDuration: 4500,
+    const PARAMS = { autosave: 12, hudInterval: 0.2, tapTravel: 8, tapDuration: 650, toastDuration: 4500, toastFade: 400,
         feedDoubleTap: 350, encounterHintDuration: 4, encounterHintFade: 1 };
     const writer = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     let profile = ZQ.createProfile();
@@ -22,6 +22,7 @@ const ZQApp = (() => {
     let failedSessionSave = false;
     let raf = 0, lastTime = 0, renderTime = 0, visualTime = 0, lastDraw = 0;
     let autosaveTime = 0, hudTime = 0, toastTimer = 0;
+    let checkpointTask = 0, checkpointIdle = false, backgrounded = false;
     let installPrompt = null, registration = null, offlineReady = false, appInstalled = false, wakeLock = null;
     let wakeGeneration = 0, pointers = new Map(), gesture = null, pinchDistance = 0;
     let lastPointer = null, cameraAngle = 0, initialized = false;
@@ -29,7 +30,7 @@ const ZQApp = (() => {
     let encounterFeedback = null;
     let placement = null;
     let lastFeedTap = -Infinity, encounterHint = null;
-    const LIVE_TRAYS = new Set(['residents', 'journal', 'score', 'settings', 'prizes', 'menu', 'activity', 'volume', 'progress']);
+    const LIVE_TRAYS = new Set(['residents', 'journal', 'score', 'settings', 'prizes', 'menu', 'camera', 'activity', 'volume', 'progress']);
     const panelContent = () => $('catalog').open ? $('catalog-content') : $('tray').hidden ? $('panel-content') : $('tray-content');
     const sound = new ZQAudio.Soundscape();
     const motionMedia = matchMedia('(prefers-reduced-motion: reduce)');
@@ -38,6 +39,7 @@ const ZQApp = (() => {
         saveFailure = message;
         $('save-warning').textContent = message;
         $('save-warning').hidden = false;
+        positionOverlays();
         updateSettingsStatus();
     }
     function load() {
@@ -59,8 +61,7 @@ const ZQApp = (() => {
                 : 'Local saving is unavailable in this browser. You can still play, but this tab cannot keep your sessions or progress after it closes.');
         }
     }
-    // Routine writes keep lifetime progress, not the live aquarium.
-    function save(session = savedSession) {
+    function save(session = savedSession, checkpoint = false) {
         if (storageBlocked || storageConflict) return false;
         try {
             const current = localStorage.getItem(ZQ.STORAGE_KEY);
@@ -73,7 +74,7 @@ const ZQApp = (() => {
             const serialized = JSON.stringify(data);
             localStorage.setItem(ZQ.STORAGE_KEY, serialized);
             lastSerialized = serialized;
-            if (saveFailure && (!failedSessionSave || session !== null)) {
+            if (saveFailure && (!failedSessionSave || checkpoint)) {
                 saveFailure = '';
                 failedSessionSave = false;
                 $('save-warning').hidden = true;
@@ -82,12 +83,35 @@ const ZQApp = (() => {
             return true;
         } catch (error) {
             if (!saveFailure) console.warn('zq3d: local saving failed.', error);
-            if (session !== null && game && !game.state.ended) failedSessionSave = true;
+            if (checkpoint) failedSessionSave = true;
             storageWarning(failedSessionSave
                 ? 'This aquarium could not be saved. Lifetime progress may still save. Keep this tab open, check browser storage, and try Save & Return again.'
                 : 'This browser could not save your progress. Keep this tab open and check available browser storage before trying again.');
             return false;
         }
+    }
+    function cancelCheckpoint() {
+        if (!checkpointTask) return;
+        if (checkpointIdle) window.cancelIdleCallback(checkpointTask);
+        else clearTimeout(checkpointTask);
+        checkpointTask = 0;
+    }
+    function checkpointTank() {
+        if (!game || game.state.ended || storageBlocked || storageConflict) return false;
+        const snapshot = game.snapshot();
+        if (!save(snapshot, true)) return false;
+        savedSession = snapshot;
+        return true;
+    }
+    function scheduleCheckpoint() {
+        if (checkpointTask || !game || game.state.ended || storageBlocked || storageConflict) return;
+        const owner = game;
+        const run = () => {
+            checkpointTask = 0;
+            if (game === owner && !game.state.ended && !document.hidden) checkpointTank();
+        };
+        checkpointIdle = typeof window.requestIdleCallback === 'function' && typeof window.cancelIdleCallback === 'function';
+        checkpointTask = checkpointIdle ? window.requestIdleCallback(run, { timeout: 2000 }) : setTimeout(run, 0);
     }
     function conflict() {
         storageConflict = true;
@@ -103,8 +127,66 @@ const ZQApp = (() => {
         const value = amount !== null ? ` ${amount > 0 ? '+' : ''}${Number(amount.toFixed(1))} pts` : '';
         $('toast').textContent = message + value;
         $('toast').dataset.kind = kind;
+        $('toast').classList.remove('fading');
         $('toast').hidden = false;
-        toastTimer = setTimeout(() => { $('toast').hidden = true; }, PARAMS.toastDuration);
+        positionOverlays();
+        toastTimer = setTimeout(() => {
+            $('toast').classList.add('fading');
+            toastTimer = setTimeout(() => { $('toast').hidden = true; positionOverlays(); }, PARAMS.toastFade);
+        }, PARAMS.toastDuration - PARAMS.toastFade);
+    }
+    function positionOverlays() {
+        if (!$('save-warning').hidden) {
+            document.body.style.setProperty('--save-warning-height', `${$('save-warning').getBoundingClientRect().height}px`);
+        }
+        if (!$('toast').hidden) {
+            const tank = $('viewport').getBoundingClientRect();
+            let top = tank.top + 12;
+            if (!$('save-warning').hidden) top = Math.max(top, $('save-warning').getBoundingClientRect().bottom + 8);
+            $('toast').style.setProperty('--toast-left', `${tank.left + tank.width / 2}px`);
+            $('toast').style.setProperty('--toast-top', `${top}px`);
+            $('toast').style.setProperty('--toast-width', `${Math.max(0, tank.width - 24)}px`);
+        }
+        if (game) {
+            const tank = $('viewport').getBoundingClientRect();
+            const controls = [
+                { node: document.querySelector('.game-hud'), key: 'hud', side: 'left' },
+                { node: $('menu-button'), key: 'menu', side: 'right' },
+                { node: $('exit-immersion'), key: 'exit', side: 'right' }
+            ].filter(control => control.node.getClientRects().length);
+            let left = tank.left + 12, right = tank.right - 12, base = tank.top + 8;
+            for (const control of controls) {
+                control.rect = control.node.getBoundingClientRect();
+                const offset = Number.parseFloat(document.body.style.getPropertyValue(`--${control.key}-offset`)) || 0;
+                base = Math.max(base, control.rect.top - offset);
+                if (control.side === 'left') left = Math.max(left, control.rect.right + 8);
+                else right = Math.min(right, control.rect.left - 8);
+            }
+            const notice = !$('toast').hidden;
+            const sharedRow = notice && right - left >= 90 && !matchMedia('(max-width: 600px) and (orientation: portrait)').matches;
+            if (sharedRow) {
+                $('toast').style.setProperty('--toast-left', `${(left + right) / 2}px`);
+                $('toast').style.setProperty('--toast-width', `${right - left}px`);
+            }
+            const noticeHeight = notice ? $('toast').getBoundingClientRect().height : 0;
+            const rowHeight = Math.max(0, ...controls.map(control => control.rect.height), sharedRow ? noticeHeight : 0);
+            for (const control of controls) {
+                document.body.style.setProperty(`--${control.key}-offset`, `${(rowHeight - control.rect.height) / 2}px`);
+            }
+            if (notice) $('toast').style.setProperty('--toast-top', `${sharedRow ? base + (rowHeight - noticeHeight) / 2 : base + rowHeight + 8}px`);
+            const rowBottom = Math.max(base + rowHeight, notice ? $('toast').getBoundingClientRect().bottom : 0);
+            $('tray').style.setProperty('--menu-tray-top', `${Math.max($('menu-button').getBoundingClientRect().bottom, rowBottom) + 8}px`);
+            if (!$('tray').hidden && $('tray').dataset.anchor === 'health') {
+                const health = document.querySelector('.game-hud').getBoundingClientRect();
+                $('tray').style.setProperty('--health-tray-top', `${Math.max(health.bottom, rowBottom) + 8}px`);
+                $('tray').style.setProperty('--health-tray-left', `${health.left}px`);
+            }
+        }
+        if (panelKind === 'volume' && !$('tray').hidden && !game) {
+            const trigger = $('sound-button').getBoundingClientRect();
+            $('tray').style.setProperty('--volume-top', `${trigger.bottom + 8}px`);
+            $('tray').style.setProperty('--volume-right', `${Math.max(12, innerWidth - trigger.right)}px`);
+        }
     }
     function applyColorScheme() {
         const requested = new URLSearchParams(location.search).get('clawpilotTheme');
@@ -135,9 +217,7 @@ const ZQApp = (() => {
         });
     }
     function syncAudio(fromGesture = false) {
-        $('sound-button').setAttribute('aria-pressed', String(settings.sound));
-        $('sound-button').setAttribute('aria-label', settings.sound ? 'Mute sound' : 'Enable sound');
-        $('sound-button').innerHTML = icon(settings.sound ? 'sound' : 'muted') + `<span class="wide-label">${settings.sound ? 'Sound on' : 'Sound off'}</span>`;
+        updateSoundControls();
         if (!settings.sound) {
             sound.disable().catch(error => {
                 console.warn('zq3d: audio could not be disabled.', error);
@@ -152,12 +232,19 @@ const ZQApp = (() => {
             console.warn('zq3d: audio could not be started.', error);
             settings.sound = false;
             save();
-            $('sound-button').setAttribute('aria-pressed', 'false');
-            $('sound-button').setAttribute('aria-label', 'Enable sound');
-            $('sound-button').innerHTML = icon('muted') + '<span class="wide-label">Sound off</span>';
             refresh();
             toast('Sound could not start. Enable sound again when your browser allows audio.', 'warning');
         });
+    }
+    function updateSoundControls() {
+        const audible = settings.sound && settings.volume > 0;
+        $('sound-button').setAttribute('aria-label', `Sound controls. ${audible ? 'Sound on' : 'Muted'}`);
+        $('sound-button').querySelector('use').setAttribute('href', `#i-${audible ? 'sound' : 'muted'}`);
+        $('volume-button').querySelector('use').setAttribute('href', `#i-${audible ? 'sound' : 'muted'}`);
+        if (panelKind === 'volume' && $('volume-mute')) {
+            $('volume-mute').textContent = settings.sound ? 'Mute' : 'Sound on';
+            $('volume-mute').setAttribute('aria-pressed', String(settings.sound));
+        }
     }
     async function releaseWakeLock() {
         ++wakeGeneration;
@@ -209,6 +296,8 @@ const ZQApp = (() => {
         clearPointers();
         encounterFeedback = null;
         failedSessionSave = false;
+        cancelCheckpoint();
+        backgrounded = false;
         closePanel();
         document.body.dataset.screen = 'game';
         $('game-ui').hidden = false;
@@ -218,7 +307,6 @@ const ZQApp = (() => {
             : new ZQ.Game(selectedTheme, profile, { width: renderer.width, height: renderer.height });
         game.resize(renderer.width, renderer.height);
         applyColorScheme();
-        savedSession = null;
         renderer.reset();
         renderer.setTheme(game.theme, game.state.bounds);
         visualTime = game.state.elapsed;
@@ -228,7 +316,7 @@ const ZQApp = (() => {
         if (resume && game.state.milestone) showMilestone();
         else if (!resume && profile.sessions === 0 && !profile.stats.food) toast('Drag to explore. Pinch or scroll to zoom.');
         consumeEvents();
-        save();
+        checkpointTank();
         refresh();
         requestFrame();
         syncAudio(true);
@@ -248,19 +336,16 @@ const ZQApp = (() => {
         clearPointers();
         encounterFeedback = null;
         if (game && !game.state.ended) {
-            pause();
-            const snapshot = game.snapshot();
-            if (!save(snapshot)) {
+            pause(undefined, false);
+            if (!checkpointTank()) {
                 toast('This session was not saved. It is still paused here. Check the saving warning and try Save & Return again.', 'warning');
                 return false;
             }
-            savedSession = snapshot;
         } else {
             savedSession = null;
             save();
         }
         game = null;
-        $('milestone-notice').hidden = true;
         applyColorScheme();
         closePanel();
         document.body.dataset.screen = 'welcome';
@@ -276,7 +361,7 @@ const ZQApp = (() => {
         requestFrame();
         return true;
     }
-    function pause(reason = 'Your aquarium is paused. Use Save & Return before closing to keep this session.') {
+    function pause(reason = 'Your aquarium is paused. Save & Return keeps it for later.', checkpoint = true) {
         if (!game || game.state.ended) return;
         encounterFeedback = null;
         clearPointers();
@@ -285,7 +370,8 @@ const ZQApp = (() => {
         stopAnimation();
         suspendAudio();
         releaseWakeLock();
-        save();
+        cancelCheckpoint();
+        if (checkpoint) checkpointTank();
         refresh();
         requestFrame();
     }
@@ -293,6 +379,7 @@ const ZQApp = (() => {
         if (!game || storageConflict) { if (storageConflict) toast('Reload to use the latest saved aquarium.', 'warning'); return; }
         if (renderer.lost) { toast('Waiting for the graphics context to recover.', 'warning'); return; }
         game.resume();
+        backgrounded = false;
         consumeEvents();
         encounterFeedback = null;
         refresh();
@@ -402,17 +489,19 @@ const ZQApp = (() => {
                 continue;
             }
             if (!['bonus', 'warning', 'achievement'].includes(event.type)) sound.effect(event.type, lastPointer ? lastPointer[0] / renderer.width * 2 - 1 : 0);
-            if (event.type === 'milestone') { showMilestone(); continue; }
+            if (event.type === 'milestone') game.continueMilestone();
             if (event.type === 'end') { showSummary(); continue; }
             if (event.creature && event.rejected && event.encounter && event.encounter === game.state.creature) {
                 encounterFeedback = { game, creature: event.encounter, message: event.message, until: game.state.elapsed + 2 };
             } else if (['decoy', 'defended', 'flash', 'challenge'].includes(event.type)) {
                 encounterFeedback = null;
             }
-            if (!event.creature && (event.rejected || event.type === 'birth' || event.type === 'defended' || event.type === 'loss' || event.type === 'attack' && !game.state.creature) &&
+            if (!event.creature && (event.rejected || event.type === 'milestone' || event.type === 'birth' || event.type === 'defended' || event.type === 'loss' || event.type === 'attack' && !game.state.creature) &&
                 (!mostImportant || (priority[event.type] || 1) >= (priority[mostImportant.type] || 1))) mostImportant = event;
         }
-        if (mostImportant) toast(mostImportant.message, mostImportant.type, mostImportant.amount ?? null);
+        if (mostImportant) toast(mostImportant.type === 'milestone' ? `${mostImportant.message} achieved!` : mostImportant.message,
+            mostImportant.type, mostImportant.amount ?? null);
+        if (events.some(e => e.type === 'defended')) scheduleCheckpoint();
         if (events.some(e => ['achievement', 'milestone', 'end', 'loss', 'birth', 'prize', 'defended', 'dispute', 'separated'].includes(e.type))) save();
     }
     function updateSocialHint() {
@@ -473,13 +562,9 @@ const ZQApp = (() => {
         node.dataset.ready = String(c.phase === 'windup');
     }
     function refresh() {
+        updateSoundControls();
         updateSettingsStatus();
-        if (!game) { updateWelcome(); return; }
-        if (!$('tray').hidden && $('tray').dataset.anchor === 'health') {
-            const health = document.querySelector('.game-hud').getBoundingClientRect();
-            $('tray').style.setProperty('--health-tray-top', `${health.bottom + 8}px`);
-            $('tray').style.setProperty('--health-tray-left', `${health.left}px`);
-        }
+        if (!game) { updateWelcome(); positionOverlays(); return; }
         const s = game.state;
         const actionable = !s.paused && !s.ended && !storageConflict;
         setText('score', number(s.score));
@@ -499,13 +584,7 @@ const ZQApp = (() => {
         $('pause-button').setAttribute('aria-label', s.paused ? 'Resume aquarium' : 'Pause aquarium');
         $('pause-button').querySelector('use').setAttribute('href', `#i-${s.paused ? 'play' : 'pause'}`);
         $('pause-button').querySelector('span').textContent = s.paused ? 'Resume' : 'Pause';
-        $('volume-button').querySelector('use').setAttribute('href', `#i-${settings.sound && settings.volume > 0 ? 'sound' : 'muted'}`);
-        if (panelKind === 'volume' && $('volume-mute')) {
-            $('volume-mute').textContent = settings.sound ? 'Mute' : 'Sound on';
-            $('volume-mute').setAttribute('aria-pressed', String(settings.sound));
-        }
         $('pause-card').hidden = !s.paused || s.ended || $('panel').open;
-        $('milestone-notice').hidden = !s.milestone || s.ended;
         $('unpause-button').disabled = storageConflict || renderer.lost;
         let care = '', action = '', target = '';
         $('care-action').disabled = !actionable;
@@ -534,14 +613,16 @@ const ZQApp = (() => {
         if (panelKind === 'prizes' && !$('tray').hidden) updatePrizes();
         if (panelKind === 'journal' && !$('tray').hidden) updateJournal();
         if (panelKind === 'score' && !$('tray').hidden) updateScore();
-        if (panelKind === 'menu' && !$('tray').hidden) updateMenu();
+        if (panelKind === 'camera' && !$('tray').hidden) updateCamera();
         if (panelKind === 'activity' && !$('tray').hidden) updateActivity();
+        positionOverlays();
     }
 
     function dismissInfoToast() {
         if ($('toast').dataset.kind !== 'info') return;
         clearTimeout(toastTimer);
         $('toast').hidden = true;
+        positionOverlays();
     }
     function openPanel(kind, title, eyebrow, html, anchor) {
         dismissInfoToast();
@@ -590,6 +671,7 @@ const ZQApp = (() => {
         if (game) save();
         $('shop-button').setAttribute('aria-expanded', String($('catalog').open));
         $('volume-button').setAttribute('aria-expanded', String(kind === 'volume'));
+        $('sound-button').setAttribute('aria-expanded', String(kind === 'volume' && !game));
         refresh();
     }
     function closePanel() {
@@ -605,6 +687,8 @@ const ZQApp = (() => {
         panelKind = '';
         $('shop-button').setAttribute('aria-expanded', 'false');
         $('volume-button').setAttribute('aria-expanded', 'false');
+        $('sound-button').setAttribute('aria-expanded', 'false');
+        positionOverlays();
     }
     function toggleAutoCare() {
         act(() => {
@@ -627,7 +711,7 @@ const ZQApp = (() => {
         if (panelKind === 'volume' && !$('tray').hidden) { closePanel(); return; }
         openPanel('volume', 'Volume', '',
             `<div class="volume-controls"><button class="small-button" id="volume-mute" aria-pressed="${settings.sound}">${settings.sound ? 'Mute' : 'Sound on'}</button>
-            <input id="dock-volume" aria-label="Volume" type="range" min="0" max="100" step="1" value="${Math.round(settings.volume * 100)}"></div>`);
+            <input id="dock-volume" aria-label="Volume" type="range" min="0" max="100" step="1" value="${Math.round(settings.volume * 100)}"></div>`, game ? 'volume' : 'sound');
         $('volume-mute').addEventListener('click', () => {
             settings.sound = !settings.sound;
             $('volume-mute').textContent = settings.sound ? 'Mute' : 'Sound on';
@@ -644,25 +728,30 @@ const ZQApp = (() => {
         const item = (action, symbol, label) => `<button class="menu-item" data-menu-action="${action}">${icon(symbol)}<span>${label}</span></button>`;
         openPanel('menu', 'Menu', game.theme.name,
             `<div class="aquarium-menu">
-            ${item('residents', 'fish', 'Residents & following')}${item('score', 'award', 'Status & progress')}
-            ${item('prizes', 'chest', 'Tank prizes')}${item('activity', 'book', 'Recent moments')}
             ${item('journal', 'book', 'Field guide')}${item('settings', 'settings', 'Settings')}
-            ${item('immerse', 'expand', 'Immerse')}
+            ${item('immerse', 'expand', 'Immerse')}${item('camera', 'orbit', 'Camera')}
             </div>
+            ${item('home', 'home', 'Save & Return')}`, 'menu');
+    }
+    function showCamera() {
+        if (!game) return;
+        const item = (action, symbol, label) => `<button class="menu-item" data-menu-action="${action}">${icon(symbol)}<span>${label}</span></button>`;
+        openPanel('camera', 'Camera', '',
+            `
             <div class="menu-camera" role="group" aria-label="Camera controls">
             ${item('orbit', 'orbit', 'Orbit')}${item('view', 'eye', 'Angle')}
             ${item('zoom-in', 'zoom-in', 'Closer')}${item('zoom-out', 'zoom-out', 'Back')}
             ${item('reset', 'reset', 'Reset')}${item('unfollow', 'fish', 'Stop following')}
-            </div>${item('home', 'home', 'Save & Return')}`, 'menu');
-        updateMenu();
+            </div>`, 'menu');
+        updateCamera();
     }
-    function updateMenu() {
+    function updateCamera() {
         panelContent().querySelector('[data-menu-action="unfollow"]').hidden = !renderer.camera.follow;
     }
     function menuAction(action) {
         const actions = {
             residents: showResidents, score: showScore, prizes: showPrizes, journal: () => showJournal(),
-            settings: showSettings, activity: showActivity,
+            settings: showSettings, activity: showActivity, camera: showCamera,
             immerse: () => immerse(true), home: goHome,
             orbit: () => renderer.orbit(Math.PI / 8, 0),
             view: () => {
@@ -861,8 +950,7 @@ const ZQApp = (() => {
         journalTab = tab;
         const tabs = `<div class="panel-tabs" role="group" aria-label="Field guide sections">
             <button data-tab="guide" aria-pressed="${tab === 'guide'}">A little guidance</button>
-            <button data-tab="achievements" aria-pressed="${tab === 'achievements'}">Discoveries &middot; ${Object.keys(profile.achievements).length}/20</button>
-            <button data-tab="prizes" aria-pressed="false">Tank prizes</button></div>`;
+            <button data-tab="achievements" aria-pressed="${tab === 'achievements'}">Discoveries &middot; ${Object.keys(profile.achievements).length}/20</button></div>`;
         const guide = `
             <p>Same soul. A new perspective. Zenquarium 3D is a standalone companion to Zenquarium, made for a few quiet minutes or a longer journey.</p>
             <div class="guide-grid">
@@ -878,12 +966,12 @@ const ZQApp = (() => {
                 ${icon('wave')}<div><h3>A habitat, not a backdrop.</h3><p>Residents browse plant edges, explore formations, rest near shelter, and follow the lower channel in loose schools. Smaller fish can use openings that larger bodies cannot fit through. Crabs follow the sand banks and food settles on their slopes. Place prizes on level sand. Your aquarium keeps its shape when the screen rotates; the camera reframes instead.</p></div>
             </div>
             <h3>Small steps, meaningful milestones</h3>
-            <p>Bronze at 1,000, Silver at 2,500, Gold at 5,000, and Platinum at 10,000 points. Master means keeping at least fifteen fish and all four species for three continuous minutes. A small notice celebrates each milestone without pausing: Continue dismisses it; Stop finishes with a victory.</p>
+            <p>Bronze at 1,000, Silver at 2,500, Gold at 5,000, and Platinum at 10,000 points. Master means keeping at least fifteen fish and all four species for three continuous minutes. Milestones celebrate briefly in the top message area, then fade while your aquarium keeps going.</p>
             <div class="note-box"><strong>Keep the flow</strong><br>The see-through fish catalog and score details leave the aquarium visible. Dialogs and trays dismiss with an outside tap or Escape. Routine discoveries and bonuses appear in Recent moments, not repeated popups. Milestone notices keep the water moving. Only explicit pause, confirmations, and session summaries stop time.</div>
             <div class="note-box"><strong>Keyboard</strong><br><span class="mono">M</span> menu &middot; <span class="mono">F</span> aim food &middot; <span class="mono">C</span> clean &middot; <span class="mono">B</span> catalog &middot; <span class="mono">T</span> tank prizes &middot; <span class="mono">Space</span> pause &middot; <span class="mono">I</span> immerse &middot; <span class="mono">R</span> reset camera &middot; arrow keys orbit &middot; <span class="mono">+ / -</span> zoom. During food aiming or a prize's Move action, arrows change x/depth, Enter confirms, and Escape cancels.</div>
             <div class="note-box">No accounts, tracking, external assets, or ads. Progress lives only on this device, separately from Zenquarium. Install from a secure web address for offline play. Time never advances while you are away.</div>`;
         openPanel('journal', 'The field guide.', 'CURIOSITY LOOKS GOOD ON YOU', tabs + (tab === 'guide' ? guide : discoveryContent()));
-        panelContent().querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => button.dataset.tab === 'prizes' ? showPrizes() : showJournal(button.dataset.tab)));
+        panelContent().querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => showJournal(button.dataset.tab)));
     }
     function updateJournal() {
         panelContent().querySelector('[data-tab="achievements"]').textContent = `Discoveries \u00b7 ${Object.keys(profile.achievements).length}/${ZQ.ACHIEVEMENTS.length}`;
@@ -895,16 +983,18 @@ const ZQApp = (() => {
     }
     function showScore(anchor) {
         if (!game) return;
-        openPanel('score', 'A healthy rhythm.', 'YOUR SCORE, EXPLAINED',
+        openPanel('score', 'Your aquarium', '',
             `<div class="session-stats"><div><strong id="detail-score"></strong><small>POINTS</small></div><div><strong id="detail-multiplier"></strong><small>MULTIPLIER</small></div><div><strong id="detail-rate"></strong><small>POINTS / SECOND</small></div></div>
             <div class="status-water"><div><span>Water health</span><strong id="water-value"></strong></div>
             <div class="meter" id="water-meter" role="progressbar" aria-label="Water health" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><span id="water-bar"></span></div></div>
             <p id="detail-population"></p><p id="next-goal"></p><progress id="goal-progress" value="0" max="1000" aria-label="Next milestone"></progress>
-            <div class="panel-actions"><button class="small-button" data-menu-action="residents">Meet residents</button><button class="small-button" data-menu-action="unfollow" id="status-unfollow" hidden>Stop following</button><button class="small-button" data-menu-action="activity">Recent moments</button></div>
+            <div class="panel-actions"><button class="small-button" data-menu-action="residents">Residents</button><button class="small-button" data-menu-action="prizes">Tank prizes</button><button class="small-button" data-menu-action="activity">Recent moments</button></div>
+            <details class="settings-section"><summary>How scoring works</summary>
             <p id="detail-streak"></p>
             <div class="note-box">30 seconds: \u00d71.5 &nbsp; / &nbsp; 90 seconds: \u00d72 &nbsp; / &nbsp; 180 seconds: \u00d73<br>All fish must be above 80% to build the streak. Below 50% resets your multiplier.</div>
             <h3>Care pays off</h3><p>Perfect Tank: +25 every 60 seconds with five fish above 90% health. Biodiversity: +15 every 45 seconds with all four species. Baby Born: +10. Clean Sweep: +20 when water is above 70% before cleaning.</p>
-            <h3>Every resident matters</h3><p>Fish lost: \u221215; starvation: \u221220. Repeated glass tapping: \u22125 and water damage. Neglected water: \u221210 every 30 seconds below 25%. Scores never go below zero.</p>`, anchor);
+            <p>Quick defense: +60 within three active seconds of the first opportunity, falling to +20 by twenty-three seconds. Pauses and the eel's wait for its first coil do not count. This reward is not multiplied by the health streak. Creature Whisperer remains separate: +30 base points when a repelled visitor leaves without a direct crab capture; its health multiplier still applies.</p>
+            <h3>Every resident matters</h3><p>Fish lost: \u221215; starvation: \u221220. Repeated glass tapping: \u22125 and water damage. Neglected water: \u221210 every 30 seconds below 25%. Scores never go below zero.</p></details>`, anchor);
     }
     function updateScore() {
         const s = game.state, earning = s.fish.filter(f => f.health > 50 && f.growth === 1).length;
@@ -922,18 +1012,18 @@ const ZQApp = (() => {
         $('goal-progress').max = milestone ? milestone.score : 180;
         $('goal-progress').value = milestone ? s.score : s.thriving || 0;
         $('goal-progress').setAttribute('aria-label', milestone ? `Progress to ${milestone.name}` : 'Progress to Master Aquarist');
-        $('status-unfollow').hidden = !renderer.camera.follow;
         $('detail-streak').textContent = `${earning} healthy adult fish earn ${ZQ.CONFIG.scoreRate} points each second, multiplied by your health streak. Your current continuous healthy streak is ${Math.floor(s.streak)} seconds.`;
     }
     function showMilestone() {
         if (!game?.state.milestone) return;
         const milestone = ZQ.MILESTONES.find(m => m.id === game.state.milestone);
-        setText('milestone-title', `${milestone.name} achieved`);
-        $('milestone-notice').hidden = false;
+        game.continueMilestone();
+        toast(`${milestone.name} achieved!`, 'milestone');
         save();
     }
     function showSummary() {
         if (!game) return;
+        cancelCheckpoint();
         const s = game.state;
         savedSession = null;
         failedSessionSave = false;
@@ -957,9 +1047,6 @@ const ZQApp = (() => {
                 <button class="secondary-button" id="reset-save-button" hidden>Reset local progress</button>
             </div>
             <div id="settings-graphics-warning" class="note-box" hidden></div>
-            <h3>Sound &amp; comfort</h3>
-            <div class="setting-row"><label for="setting-sound">Sound<small>Underwater ambience and musical effects.</small></label><input id="setting-sound" type="checkbox" ${settings.sound ? 'checked' : ''}></div>
-            <div class="setting-row"><label for="setting-volume">Volume</label><input id="setting-volume" type="range" min="0" max="100" step="1" value="${Math.round(settings.volume * 100)}"></div>
             <div class="setting-row"><label for="setting-motion">Motion<small>Reduced motion softens plants, fins, and floating details.</small></label><select id="setting-motion">
             ${[['system', 'Follow device'], ['full', 'Full'], ['reduced', 'Reduced']].map(([id, label]) => `<option value="${id}" ${settings.motion === id ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
             <details class="settings-section" id="settings-display">
@@ -977,11 +1064,7 @@ const ZQApp = (() => {
                 <p id="settings-offline-status" class="settings-detail"></p>
                 <button class="secondary-button" id="install-app" hidden>Install Zenquarium 3D</button>
             </details>
-            <h3>Your progress</h3>
-            <p>Lifetime stats, discoveries, and preferences are saved automatically on this device. Use <strong>Save &amp; Return</strong> each time you want to keep the current aquarium for later. Only one session is kept.</p>
-            ${game && !game.state.ended ? '<div class="panel-actions"><button class="secondary-button" id="save-home-button">Save &amp; Return</button><button class="secondary-button" id="end-session-button">Finish this session</button></div>' : ''}`);
-        $('setting-sound').addEventListener('change', event => { settings.sound = event.target.checked; save(); syncAudio(true); refresh(); });
-        $('setting-volume').addEventListener('input', event => { settings.volume = Number(event.target.value) / 100; sound.setVolume(settings.volume); save(); refresh(); });
+            <p class="settings-detail">Progress stays on this device. Automatic aquarium checkpoints are best effort; <strong>Save &amp; Return</strong> confirms a save before leaving. Only one aquarium is kept.</p>`);
         $('setting-quality').addEventListener('change', event => {
             settings.quality = event.target.value; renderer.setQuality(settings.quality); save(); refresh(); requestFrame();
         });
@@ -1003,8 +1086,6 @@ const ZQApp = (() => {
         });
         $('fullscreen-button')?.addEventListener('click', toggleFullscreen);
         $('install-app').addEventListener('click', install);
-        $('save-home-button')?.addEventListener('click', goHome);
-        $('end-session-button')?.addEventListener('click', () => confirmPanel('Finish this session?', 'This ends the aquarium and shows your results. To keep it for later instead, use Save & Return.', 'Finish session', () => act(() => game.finish())));
     }
     function updateSettingsStatus() {
         if (panelKind !== 'settings' || $('tray').hidden) return;
@@ -1054,6 +1135,7 @@ const ZQApp = (() => {
         document.body.classList.toggle('immersed', enabled);
         $('exit-immersion').hidden = !enabled;
         if (enabled) $('exit-immersion').focus(); else $('menu-button').focus();
+        positionOverlays();
         requestFrame();
     }
     function stopAnimation() {
@@ -1084,7 +1166,7 @@ const ZQApp = (() => {
             if (game) {
                 consumeEvents();
                 autosaveTime += dt; hudTime += dt;
-                if (autosaveTime >= PARAMS.autosave) { autosaveTime = 0; save(); }
+                if (autosaveTime >= PARAMS.autosave) { autosaveTime = 0; scheduleCheckpoint(); }
                 if (hudTime >= PARAMS.hudInterval) { hudTime = 0; refresh(); }
             }
         }
@@ -1103,6 +1185,7 @@ const ZQApp = (() => {
     function resize() {
         if (!renderer) return;
         renderer.resize();
+        positionOverlays();
         const rect = $('viewport').getBoundingClientRect();
         document.body.style.setProperty('--preview-top', `${rect.top}px`);
         document.body.style.setProperty('--preview-bottom', `${Math.max(0, innerHeight - rect.top - rect.height)}px`);
@@ -1300,12 +1383,18 @@ const ZQApp = (() => {
         }
     }
     function background() {
+        if (backgrounded) return;
+        backgrounded = true;
+        cancelCheckpoint();
         clearPointers();
         if (game && !game.state.ended) {
             game.state.paused = true;
             $('pause-reason').textContent = 'Welcome back. Your fish waited for you. Resume whenever you are ready.';
         }
-        stopAnimation(); suspendAudio(); releaseWakeLock(); save(); refresh();
+        stopAnimation(); suspendAudio(); releaseWakeLock();
+        if (game && !game.state.ended) checkpointTank();
+        else save();
+        refresh();
     }
     async function setupOffline() {
         if (location.protocol === 'file:' || !('serviceWorker' in navigator)) return;
@@ -1357,7 +1446,7 @@ const ZQApp = (() => {
         $('journal-button').addEventListener('click', () => showJournal('guide'));
         $('progress-button').addEventListener('click', showProgress);
         $('settings-button').addEventListener('click', showSettings);
-        $('sound-button').addEventListener('click', () => { settings.sound = !settings.sound; save(); syncAudio(true); });
+        $('sound-button').addEventListener('click', showVolume);
         $('feed-button').addEventListener('click', feed);
         $('clean-button').addEventListener('click', () => act(() => game.clean()));
         $('shop-button').addEventListener('click', showShop);
@@ -1382,13 +1471,6 @@ const ZQApp = (() => {
         });
         $('placement-confirm').addEventListener('click', commitPlacement);
         $('placement-cancel').addEventListener('click', clearPointers);
-        $('milestone-continue').addEventListener('click', () => act(() => game.continueMilestone()));
-        $('milestone-end').addEventListener('click', () => {
-            if (game?.state.milestone) {
-                const milestone = ZQ.MILESTONES.find(m => m.id === game.state.milestone);
-                act(() => game.finish('victory', milestone.name));
-            }
-        });
         $('catalog').addEventListener('close', () => {
             $('catalog-content').replaceChildren();
             if (panelKind === 'shop') panelKind = '';
@@ -1406,11 +1488,11 @@ const ZQApp = (() => {
                 return;
             }
             if ($('catalog').open && !$('catalog').contains(event.target) &&
-                !event.target.closest('.command-controls, .aquarium-menu-button, .game-hud, #milestone-notice, #care-alert')) {
+                !event.target.closest('.command-controls, .aquarium-menu-button, .game-hud, #care-alert')) {
                 closePanel();
                 event.preventDefault(); event.stopPropagation();
             } else if (!$('tray').hidden && !$('tray').contains(event.target) &&
-                !event.target.closest('.command-controls, .aquarium-menu-button, .game-hud, #milestone-notice, #care-alert')) {
+                !event.target.closest('.command-controls, .aquarium-menu-button, .game-hud, #care-alert')) {
                 closePanel();
                 event.preventDefault(); event.stopPropagation();
             }
@@ -1442,10 +1524,10 @@ const ZQApp = (() => {
         window.addEventListener('blur', clearPointers);
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) background();
-            else { lastTime = 0; refresh(); requestFrame(); if (!game) syncAudio(); }
+            else { backgrounded = false; lastTime = 0; refresh(); requestFrame(); if (!game) syncAudio(); }
         });
         window.addEventListener('pagehide', background);
-        window.addEventListener('pageshow', () => { lastTime = 0; requestFrame(); });
+        window.addEventListener('pageshow', () => { backgrounded = false; lastTime = 0; requestFrame(); });
         document.addEventListener('freeze', background);
         window.addEventListener('storage', event => {
             if (event.key === ZQ.STORAGE_KEY && event.newValue !== lastSerialized) conflict();
