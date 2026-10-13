@@ -320,6 +320,7 @@ def main():
                 menu_action("sound")
                 require(page.evaluate("ZQApp.settings.sound"), "Sound did not enable")
                 menu_action("settings")
+                page.locator("#settings-display > summary").click()
                 page.locator("#setting-quality").select_option("battery")
                 page.locator("#setting-motion").select_option("reduced")
                 page.locator("#tray-close").click()

@@ -1,13 +1,13 @@
 'use strict';
 
 const PREFIX = 'zq3d-shell-';
-const CACHE = `${PREFIX}v32`;
+const CACHE = `${PREFIX}v39`;
 const ROOT = new URL('./', self.location.href);
 const ASSETS = [
     './index.html', './styles.css', './core.js', './renderer.js', './audio.js',
     './app.js', './manifest.webmanifest', './icon.svg',
     './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png',
-    './icons/apple-touch-icon.png'
+    './icons/apple-touch-icon.png', './icons/favicon-32.png'
 ].map(path => new URL(path, ROOT).href);
 const SHELL = new Set(ASSETS);
 
@@ -44,7 +44,7 @@ self.addEventListener('fetch', event => {
         try { return await fetch(request); }
         catch (error) {
             console.warn('zq3d: an uncached resource is unavailable offline.', asset, error);
-            return new Response('This aquarium file is not available offline yet. Reconnect and reload zq3d.', {
+            return new Response('This aquarium file is not available offline yet. Reconnect and reload Zenquarium 3D.', {
                 status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' }
             });
         }

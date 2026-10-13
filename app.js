@@ -1,6 +1,7 @@
 'use strict';
 
 const ZQApp = (() => {
+    const APP_VERSION = '0.1.0';
     const $ = id => document.getElementById(id);
     const setText = (id, text) => {
         const node = $(id);
@@ -18,16 +19,17 @@ const ZQApp = (() => {
     let savedSession = null, game = null, demo = null, renderer = null;
     let selectedTheme = 'tropical', panelKind = '', journalTab = 'guide';
     let lastSerialized = null, storageBlocked = false, storageConflict = false, saveFailure = '', freshSaveRequired = false;
+    let failedSessionSave = false;
     let raf = 0, lastTime = 0, renderTime = 0, visualTime = 0, lastDraw = 0;
     let autosaveTime = 0, hudTime = 0, toastTimer = 0;
-    let installPrompt = null, registration = null, offlineReady = false, wakeLock = null;
+    let installPrompt = null, registration = null, offlineReady = false, appInstalled = false, wakeLock = null;
     let wakeGeneration = 0, pointers = new Map(), gesture = null, pinchDistance = 0;
     let lastPointer = null, cameraAngle = 0, initialized = false;
     let trayTrigger = null;
     let encounterFeedback = null;
     let placement = null;
     let lastFeedTap = -Infinity, encounterHint = null;
-    const LIVE_TRAYS = new Set(['residents', 'journal', 'score', 'settings', 'prizes', 'menu', 'activity', 'volume']);
+    const LIVE_TRAYS = new Set(['residents', 'journal', 'score', 'settings', 'prizes', 'menu', 'activity', 'volume', 'progress']);
     const panelContent = () => $('catalog').open ? $('catalog-content') : $('tray').hidden ? $('panel-content') : $('tray-content');
     const sound = new ZQAudio.Soundscape();
     const motionMedia = matchMedia('(prefers-reduced-motion: reduce)');
@@ -36,6 +38,7 @@ const ZQApp = (() => {
         saveFailure = message;
         $('save-warning').textContent = message;
         $('save-warning').hidden = false;
+        updateSettingsStatus();
     }
     function load() {
         try {
@@ -50,15 +53,15 @@ const ZQApp = (() => {
         } catch (error) {
             storageBlocked = true;
             console.warn('zq3d: saved data was not loaded or overwritten.', error);
-            storageWarning(freshSaveRequired ? 'This development update needs a fresh aquarium. Your old save is untouched. Open Settings and choose Start fresh aquarium to enable saving.'
+            storageWarning(freshSaveRequired ? 'This development version cannot read your saved format. Your old data is untouched. Open Settings to review Reset local progress.'
                 : lastSerialized
-                ? 'Your saved aquarium could not be read. It has not been changed. See Settings to recover or reset only zq3d data.'
-                : 'Local saving is unavailable in this browser. You can still play, and export a backup from Settings before leaving.');
+                ? 'Your saved progress could not be read. It has not been changed. Open Settings to review Reset local progress.'
+                : 'Local saving is unavailable in this browser. You can still play, but this tab cannot keep your sessions or progress after it closes.');
         }
     }
-    function save() {
+    // Routine writes keep lifetime progress, not the live aquarium.
+    function save(session = savedSession) {
         if (storageBlocked || storageConflict) return false;
-        const session = game && !game.state.ended ? game.snapshot() : savedSession;
         try {
             const current = localStorage.getItem(ZQ.STORAGE_KEY);
             if (current !== lastSerialized) {
@@ -70,11 +73,19 @@ const ZQApp = (() => {
             const serialized = JSON.stringify(data);
             localStorage.setItem(ZQ.STORAGE_KEY, serialized);
             lastSerialized = serialized;
-            if (saveFailure) { saveFailure = ''; $('save-warning').hidden = true; }
+            if (saveFailure && (!failedSessionSave || session !== null)) {
+                saveFailure = '';
+                failedSessionSave = false;
+                $('save-warning').hidden = true;
+                updateSettingsStatus();
+            }
             return true;
         } catch (error) {
             if (!saveFailure) console.warn('zq3d: local saving failed.', error);
-            storageWarning('This browser could not save your aquarium. Keep this tab open or export a backup in Settings.');
+            if (session !== null && game && !game.state.ended) failedSessionSave = true;
+            storageWarning(failedSessionSave
+                ? 'This aquarium could not be saved. Lifetime progress may still save. Keep this tab open, check browser storage, and try Save & Return again.'
+                : 'This browser could not save your progress. Keep this tab open and check available browser storage before trying again.');
             return false;
         }
     }
@@ -86,39 +97,6 @@ const ZQApp = (() => {
         suspendAudio();
         releaseWakeLock();
         refresh();
-    }
-    function exportSave() {
-        const data = storageBlocked && lastSerialized ? lastSerialized : JSON.stringify({
-            version: ZQ.VERSION, savedAt: new Date().toISOString(), writer,
-            profile, settings, session: game && !game.state.ended ? game.snapshot() : savedSession
-        }, null, 2);
-        const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
-        const a = document.createElement('a');
-        a.href = url; a.download = `zq3d-${new Date().toISOString().slice(0, 10)}.json`;
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }
-    function restoreSave(file) {
-        if (!file) return;
-        if (file.size > 500000) { toast('That backup is too large. Choose a zq3d JSON backup under 500 KB.', 'warning'); return; }
-        file.text().then(text => {
-            let candidate;
-            try { candidate = ZQ.validateSave(JSON.parse(text)); }
-            catch (error) { console.warn('zq3d: backup rejected.', error); toast('That backup is not a valid zq3d save. Your current aquarium is unchanged.', 'warning'); return; }
-            confirmPanel('Restore this aquarium?', 'This replaces only zq3d progress on this device. The original Zenquarium is never changed.', 'Restore backup', () => {
-                try {
-                    const data = { ...candidate, writer, savedAt: new Date().toISOString() };
-                    localStorage.setItem(ZQ.STORAGE_KEY, JSON.stringify(data));
-                    location.reload();
-                } catch (error) {
-                    console.error('zq3d: could not restore the backup.', error);
-                    storageWarning('The backup was valid, but this browser could not store it. Free some storage and try again.');
-                }
-            });
-        }).catch(error => {
-            console.error('zq3d: backup file could not be read.', error);
-            toast('The backup file could not be read. Your aquarium is unchanged.', 'warning');
-        });
     }
     function toast(message, kind = 'info', amount = null) {
         clearTimeout(toastTimer);
@@ -136,7 +114,7 @@ const ZQApp = (() => {
         const inkWelcome = theme.id === 'ink' && !game;
         root.dataset.theme = override ? requested : theme.id === 'ink' && !inkWelcome ? 'light' : 'dark';
         root.toggleAttribute('data-aquarium-ui', !override);
-        const palette = inkWelcome ? { bg: '#0b1420', surface: '#172838', text: '#e8dcc8', accent: '#c9baa0' } : theme.ui;
+        const palette = inkWelcome ? theme.welcomeUi : theme.ui;
         for (const [key, value] of Object.entries(palette)) root.style.setProperty(`--cp-aquarium-${key}`, value);
         document.querySelector('meta[name="theme-color"]').content = getComputedStyle(root).getPropertyValue('--cp-bg').trim();
     }
@@ -223,16 +201,14 @@ const ZQApp = (() => {
     function updateWelcome() {
         $('best-score').textContent = number(profile.highScore);
         $('achievement-count').innerHTML = `${Object.keys(profile.achievements).length} <small>/ 20</small>`;
+        $('resume-card').hidden = !savedSession;
         $('resume-button').hidden = !savedSession;
-        if (savedSession) {
-            $('resume-button').textContent = 'Resume aquarium';
-            $('resume-button').setAttribute('aria-label', `Resume ${ZQ.THEMES[savedSession.themeId].name}`);
-        }
     }
     function begin(resume = false) {
         if (storageConflict) { toast('Reload from Settings to use the aquarium saved by the other window.', 'warning'); return; }
         clearPointers();
         encounterFeedback = null;
+        failedSessionSave = false;
         closePanel();
         document.body.dataset.screen = 'game';
         $('game-ui').hidden = false;
@@ -272,10 +248,17 @@ const ZQApp = (() => {
         clearPointers();
         encounterFeedback = null;
         if (game && !game.state.ended) {
-            game.state.paused = true;
-            savedSession = game.snapshot();
-        } else savedSession = null;
-        save();
+            pause();
+            const snapshot = game.snapshot();
+            if (!save(snapshot)) {
+                toast('This session was not saved. It is still paused here. Check the saving warning and try Save & Return again.', 'warning');
+                return false;
+            }
+            savedSession = snapshot;
+        } else {
+            savedSession = null;
+            save();
+        }
         game = null;
         $('milestone-notice').hidden = true;
         applyColorScheme();
@@ -291,8 +274,9 @@ const ZQApp = (() => {
         updateWelcome();
         releaseWakeLock();
         requestFrame();
+        return true;
     }
-    function pause(reason = 'Your aquarium is safely paused. Nothing changes while you are away.') {
+    function pause(reason = 'Your aquarium is paused. Use Save & Return before closing to keep this session.') {
         if (!game || game.state.ended) return;
         encounterFeedback = null;
         clearPointers();
@@ -489,6 +473,7 @@ const ZQApp = (() => {
         node.dataset.ready = String(c.phase === 'windup');
     }
     function refresh() {
+        updateSettingsStatus();
         if (!game) { updateWelcome(); return; }
         if (!$('tray').hidden && $('tray').dataset.anchor === 'health') {
             const health = document.querySelector('.game-hud').getBoundingClientRect();
@@ -588,6 +573,11 @@ const ZQApp = (() => {
             $('tray-content').replaceChildren();
             document.body.classList.remove('tray-open');
             $('menu-button').setAttribute('aria-expanded', 'false');
+            const about = kind === 'about';
+            $('panel-logo').hidden = !about;
+            $('panel-version').hidden = !about;
+            $('panel-eyebrow').hidden = about;
+            $('app-version').textContent = about ? APP_VERSION : '';
             $('panel-title').textContent = title;
             $('panel-eyebrow').textContent = eyebrow;
             $('panel-content').innerHTML = html;
@@ -663,7 +653,7 @@ const ZQApp = (() => {
             ${item('orbit', 'orbit', 'Orbit')}${item('view', 'eye', 'Angle')}
             ${item('zoom-in', 'zoom-in', 'Closer')}${item('zoom-out', 'zoom-out', 'Back')}
             ${item('reset', 'reset', 'Reset')}${item('unfollow', 'fish', 'Stop following')}
-            </div>${item('home', 'home', 'Save & return home')}`, 'menu');
+            </div>${item('home', 'home', 'Save & Return')}`, 'menu');
         updateMenu();
     }
     function updateMenu() {
@@ -841,6 +831,32 @@ const ZQApp = (() => {
             progress.value = prize.stat === 'score' ? s.score : s.stats[prize.stat];
         }
     }
+    function discoveryContent() {
+        return `<p>Twenty little reasons to look closer. Each discovery awards its bonus once per saved profile, multiplied by your current healthy streak.</p>
+            <div class="achievement-grid">${ZQ.ACHIEVEMENTS.map(a => `<article data-achievement="${a.id}" class="achievement ${profile.achievements[a.id] ? 'unlocked' : ''}">
+            <div class="achievement-top">${icon('award')}<span>+${a.bonus} pts</span></div><h3>${a.name}</h3><p>${a.description}</p><small>${profile.achievements[a.id] ? `Discovered ${profile.achievements[a.id]}` : 'Still to discover'}</small></article>`).join('')}</div>`;
+    }
+    function showProgress() {
+        openPanel('progress', 'Your progress.', 'ACROSS YOUR AQUARIUMS',
+            `<div class="session-stats">
+                <div><strong>${number(profile.highScore)}</strong><small>PERSONAL BEST</small></div>
+                <div><strong>${number(profile.sessions)}</strong><small>SESSIONS COMPLETED</small></div>
+                <div><strong>${duration(profile.stats.longest)}</strong><small>LONGEST SESSION</small></div>
+                <div><strong>${profile.themesPlayed.length} / ${Object.keys(ZQ.THEMES).length}</strong><small>WORLDS VISITED</small></div>
+                <div><strong>${number(profile.stats.born)}</strong><small>BABIES BORN</small></div>
+                <div><strong>${Object.keys(profile.achievements).length} / ${ZQ.ACHIEVEMENTS.length}</strong><small>DISCOVERIES</small></div>
+            </div>
+            <h3>Your discoveries</h3>${discoveryContent()}`);
+    }
+    function showAbout() {
+        openPanel('about', 'Zenquarium 3D', '',
+            `<p id="about-tagline" class="brand-tagline" tabindex="-1">A little world. <span>A deeper calm.</span></p>
+            <p id="about-description">The calm of Zenquarium, in three dimensions. Explore five living worlds, care for curious fish, and enjoy locally generated sights and sound.</p>
+            <p>Created with care. No accounts, telemetry, or external services. Your progress stays on this device.</p>
+            <a class="original-link" href="https://rmauceri.github.io/zenquarium" target="_blank" rel="noopener noreferrer">Looking for the original Zenquarium? <span aria-hidden="true">&nearr;</span></a>`);
+        $('about-tagline').focus({ preventScroll: true });
+        $('panel-content').scrollTop = 0;
+    }
     function showJournal(tab = journalTab) {
         journalTab = tab;
         const tabs = `<div class="panel-tabs" role="group" aria-label="Field guide sections">
@@ -848,7 +864,7 @@ const ZQApp = (() => {
             <button data-tab="achievements" aria-pressed="${tab === 'achievements'}">Discoveries &middot; ${Object.keys(profile.achievements).length}/20</button>
             <button data-tab="prizes" aria-pressed="false">Tank prizes</button></div>`;
         const guide = `
-            <p>Same soul. A new perspective. zq3d is a standalone 3D companion to Zenquarium, made for a few quiet minutes or a longer journey.</p>
+            <p>Same soul. A new perspective. Zenquarium 3D is a standalone companion to Zenquarium, made for a few quiet minutes or a longer journey.</p>
             <div class="guide-grid">
                 ${icon('feed')}<div><h3>Tend, don't hurry.</h3><p>Tap Feed once, then click anywhere in the water to place flakes there. Double-tap Feed for a normal surface drop. Each drop costs 5 points; Escape cancels without spending. Clean for 10. Adult fish above 50% health earn 0.5 points per second. Babies grow into their role. Empty aquariums have a five-second rescue window; zero water health ends a session.</p></div>
                 ${icon('award')}<div><h3>A healthy rhythm.</h3><p>Keep every fish above 80% health for \u00d71.5 at 30 seconds, \u00d72 at 90, and \u00d73 at 180. A fish below 50% resets it. The multiplier applies to positive earnings, not costs or penalties. All four species, happy schools, and baby fish bring bonuses.</p></div>
@@ -866,10 +882,7 @@ const ZQApp = (() => {
             <div class="note-box"><strong>Keep the flow</strong><br>The see-through fish catalog and score details leave the aquarium visible. Dialogs and trays dismiss with an outside tap or Escape. Routine discoveries and bonuses appear in Recent moments, not repeated popups. Milestone notices keep the water moving. Only explicit pause, confirmations, and session summaries stop time.</div>
             <div class="note-box"><strong>Keyboard</strong><br><span class="mono">M</span> menu &middot; <span class="mono">F</span> aim food &middot; <span class="mono">C</span> clean &middot; <span class="mono">B</span> catalog &middot; <span class="mono">T</span> tank prizes &middot; <span class="mono">Space</span> pause &middot; <span class="mono">I</span> immerse &middot; <span class="mono">R</span> reset camera &middot; arrow keys orbit &middot; <span class="mono">+ / -</span> zoom. During food aiming or a prize's Move action, arrows change x/depth, Enter confirms, and Escape cancels.</div>
             <div class="note-box">No accounts, tracking, external assets, or ads. Progress lives only on this device, separately from Zenquarium. Install from a secure web address for offline play. Time never advances while you are away.</div>`;
-        const achievements = `<p>Twenty little reasons to look closer. Each discovery awards its bonus once per saved profile, multiplied by your current healthy streak.</p>
-            <div class="achievement-grid">${ZQ.ACHIEVEMENTS.map(a => `<article data-achievement="${a.id}" class="achievement ${profile.achievements[a.id] ? 'unlocked' : ''}">
-            <div class="achievement-top">${icon('award')}<span>+${a.bonus} pts</span></div><h3>${a.name}</h3><p>${a.description}</p><small>${profile.achievements[a.id] ? `Discovered ${profile.achievements[a.id]}` : 'Still to discover'}</small></article>`).join('')}</div>`;
-        openPanel('journal', 'The field guide.', 'CURIOSITY LOOKS GOOD ON YOU', tabs + (tab === 'guide' ? guide : achievements));
+        openPanel('journal', 'The field guide.', 'CURIOSITY LOOKS GOOD ON YOU', tabs + (tab === 'guide' ? guide : discoveryContent()));
         panelContent().querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => button.dataset.tab === 'prizes' ? showPrizes() : showJournal(button.dataset.tab)));
     }
     function updateJournal() {
@@ -923,6 +936,7 @@ const ZQApp = (() => {
         if (!game) return;
         const s = game.state;
         savedSession = null;
+        failedSessionSave = false;
         document.body.classList.remove('immersed'); $('exit-immersion').hidden = true;
         openPanel('summary', s.outcome === 'victory' ? 'A beautiful place to pause.' : s.outcome === 'defeat' ? 'Every aquarium teaches us.' : 'Time well spent.',
             s.outcome === 'victory' ? 'A WELL-EARNED VICTORY' : 'YOUR AQUARIUM JOURNAL',
@@ -935,49 +949,94 @@ const ZQApp = (() => {
         save();
     }
     function showSettings() {
-        const inFile = location.protocol === 'file:';
-        const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-        const installText = standalone ? 'Installed. Your aquarium has a home on this device.'
-            : inFile ? 'Local-file mode works without a connection. To install as an app, serve this folder on localhost or HTTPS.'
-            : offlineReady ? 'Ready for offline visits. Install with your browser menu, or Share \u2192 Add to Home Screen on iPhone and iPad.'
-            : 'Offline installation needs HTTPS or localhost. Your browser is preparing the local app cache when supported.';
-        openPanel('settings', 'Make yourself at home.', 'YOUR OWN PACE',
-            `<div class="setting-row"><label for="setting-sound">Underwater sound<small>Handmade, synthesized soundscapes. Headphones welcome.</small></label><input id="setting-sound" type="checkbox" ${settings.sound ? 'checked' : ''}></div>
-            <div class="setting-row"><label for="setting-volume">Volume<small>Soft by design.</small></label><input id="setting-volume" type="range" min="0" max="100" step="1" value="${Math.round(settings.volume * 100)}"></div>
-            <div class="setting-row"><label for="setting-quality">Visual quality<small>Auto adapts to your device. Battery saver targets 30 frames per second.</small></label><select id="setting-quality">
-            ${[['auto', 'Auto'], ['high', 'High'], ['balanced', 'Balanced'], ['battery', 'Battery saver']].map(([id, label]) => `<option value="${id}" ${settings.quality === id ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
-            <div class="setting-row"><label for="setting-motion">Motion<small>Reduced motion softens foliage, fins, and floating details.</small></label><select id="setting-motion">
+        const fullscreen = document.fullscreenElement || document.fullscreenEnabled && document.documentElement.requestFullscreen;
+        openPanel('settings', 'Settings', 'YOUR PREFERENCES',
+            `<div id="settings-save-warning" class="note-box error-text" hidden></div>
+            <div id="settings-save-actions" class="panel-actions" hidden>
+                <button class="secondary-button" id="reload-button" hidden>Reload latest save</button>
+                <button class="secondary-button" id="reset-save-button" hidden>Reset local progress</button>
+            </div>
+            <div id="settings-graphics-warning" class="note-box" hidden></div>
+            <h3>Sound &amp; comfort</h3>
+            <div class="setting-row"><label for="setting-sound">Sound<small>Underwater ambience and musical effects.</small></label><input id="setting-sound" type="checkbox" ${settings.sound ? 'checked' : ''}></div>
+            <div class="setting-row"><label for="setting-volume">Volume</label><input id="setting-volume" type="range" min="0" max="100" step="1" value="${Math.round(settings.volume * 100)}"></div>
+            <div class="setting-row"><label for="setting-motion">Motion<small>Reduced motion softens plants, fins, and floating details.</small></label><select id="setting-motion">
             ${[['system', 'Follow device'], ['full', 'Full'], ['reduced', 'Reduced']].map(([id, label]) => `<option value="${id}" ${settings.motion === id ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
-            <div class="setting-row"><label for="setting-awake">Keep screen awake<small>Optional. Only while this aquarium is visible and running.</small></label><input id="setting-awake" type="checkbox" ${settings.keepAwake ? 'checked' : ''} ${'wakeLock' in navigator ? '' : 'disabled'}></div>
-            <div class="note-box"><strong>${renderer.is3D ? 'WebGL 3D' : 'Perspective compatibility renderer'}</strong> &middot; ${renderer.level} quality<br>${safeText(installText)}</div>
-            <div class="panel-actions">${installPrompt ? '<button class="secondary-button" id="install-app">Install zq3d</button>' : ''}<button class="secondary-button" id="fullscreen-button">Toggle fullscreen</button></div>
-            <h3>Locally yours</h3><p>Progress is saved automatically, including your fish, visitors, hazards, and milestones. Switching apps pauses everything. zq3d never reads or modifies the original Zenquarium save.</p>
-            ${saveFailure ? `<div class="note-box error-text">${safeText(saveFailure)}</div>` : ''}
-            <div class="panel-actions"><button class="secondary-button" id="export-button">Export backup</button><button class="secondary-button" id="import-button">Restore backup</button>
-            ${storageConflict ? '<button class="primary-button" id="reload-button">Reload latest save</button>' : ''}
-            ${storageBlocked && lastSerialized ? `<button class="secondary-button" id="reset-save-button">${freshSaveRequired ? 'Start fresh aquarium' : 'Reset unreadable zq3d save'}</button>` : ''}</div>
-            <input id="import-file" type="file" accept=".json,application/json" hidden>
-            ${game && !game.state.ended ? '<div class="panel-actions"><button class="secondary-button" id="save-home-button">Save &amp; return home</button><button class="secondary-button" id="end-session-button">Finish this session</button></div>' : ''}
-            <p style="margin-top:24px">zq3d &middot; A parallel Zenquarium experience<br>Created with care. No accounts, telemetry, or external services.</p>`);
+            <details class="settings-section" id="settings-display">
+                <summary>Display &amp; battery</summary>
+                <p>Automatic is recommended. These options affect appearance and power use, not the game rules.</p>
+                <div class="setting-row"><label for="setting-quality">Visual quality<small>Automatic adapts to your device. Battery saver targets 30 frames per second.</small></label><select id="setting-quality">
+                ${[['auto', 'Automatic'], ['high', 'High'], ['balanced', 'Balanced'], ['battery', 'Battery saver']].map(([id, label]) => `<option value="${id}" ${settings.quality === id ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
+                ${'wakeLock' in navigator ? `<div class="setting-row"><label for="setting-awake">Keep screen awake<small>Only while the aquarium is visible and running.</small></label><input id="setting-awake" type="checkbox" ${settings.keepAwake ? 'checked' : ''}></div>` : ''}
+                ${fullscreen ? '<div class="panel-actions"><button class="secondary-button" id="fullscreen-button">Toggle fullscreen</button></div>' : ''}
+                <p id="settings-renderer" class="settings-detail"></p>
+            </details>
+            <details class="settings-section" id="settings-install">
+                <summary>Install &amp; offline</summary>
+                <p id="settings-install-status"></p>
+                <p id="settings-offline-status" class="settings-detail"></p>
+                <button class="secondary-button" id="install-app" hidden>Install Zenquarium 3D</button>
+            </details>
+            <h3>Your progress</h3>
+            <p>Lifetime stats, discoveries, and preferences are saved automatically on this device. Use <strong>Save &amp; Return</strong> each time you want to keep the current aquarium for later. Only one session is kept.</p>
+            ${game && !game.state.ended ? '<div class="panel-actions"><button class="secondary-button" id="save-home-button">Save &amp; Return</button><button class="secondary-button" id="end-session-button">Finish this session</button></div>' : ''}`);
         $('setting-sound').addEventListener('change', event => { settings.sound = event.target.checked; save(); syncAudio(true); refresh(); });
         $('setting-volume').addEventListener('input', event => { settings.volume = Number(event.target.value) / 100; sound.setVolume(settings.volume); save(); refresh(); });
         $('setting-quality').addEventListener('change', event => {
-            settings.quality = event.target.value; renderer.setQuality(settings.quality); save(); requestFrame();
+            settings.quality = event.target.value; renderer.setQuality(settings.quality); save(); refresh(); requestFrame();
         });
         $('setting-motion').addEventListener('change', event => { settings.motion = event.target.value; applyMotion(); save(); });
-        $('setting-awake').addEventListener('change', event => { settings.keepAwake = event.target.checked; save(); syncWakeLock(); });
-        $('export-button').addEventListener('click', exportSave);
-        $('import-button').addEventListener('click', () => $('import-file').click());
-        $('import-file').addEventListener('change', event => restoreSave(event.target.files[0]));
-        $('reload-button')?.addEventListener('click', () => location.reload());
-        $('reset-save-button')?.addEventListener('click', () => confirmPanel(freshSaveRequired ? 'Start fresh for this development update?' : 'Reset the unreadable save?', 'This removes only zq3d data, including this device\'s previous aquarium and discoveries. Export a backup first if you want to keep it.', 'Reset zq3d', () => {
-            try { localStorage.removeItem(ZQ.STORAGE_KEY); location.reload(); }
-            catch (error) { console.error('zq3d: save reset failed.', error); storageWarning('This browser did not allow the saved data to be removed.'); }
-        }));
-        $('fullscreen-button').addEventListener('click', toggleFullscreen);
-        $('install-app')?.addEventListener('click', install);
+        $('setting-awake')?.addEventListener('change', event => { settings.keepAwake = event.target.checked; save(); syncWakeLock(); });
+        $('reload-button').addEventListener('click', () => location.reload());
+        $('reset-save-button').addEventListener('click', () => {
+            const expectedSave = lastSerialized;
+            confirmPanel('Reset local progress?', 'This removes this device\'s saved aquarium, lifetime statistics, and discoveries for Zenquarium 3D. It cannot be undone. The original Zenquarium is not affected.', 'Reset progress', () => {
+                try {
+                    if (localStorage.getItem(ZQ.STORAGE_KEY) !== expectedSave) { conflict(); return; }
+                    localStorage.removeItem(ZQ.STORAGE_KEY);
+                    location.reload();
+                } catch (error) {
+                    console.error('zq3d: save reset failed.', error);
+                    storageWarning('This browser did not allow the saved data to be removed.');
+                }
+            });
+        });
+        $('fullscreen-button')?.addEventListener('click', toggleFullscreen);
+        $('install-app').addEventListener('click', install);
         $('save-home-button')?.addEventListener('click', goHome);
-        $('end-session-button')?.addEventListener('click', () => confirmPanel('Finish this session?', 'Your score and discoveries will be recorded. To keep this aquarium for later instead, choose Save & return home.', 'Finish session', () => act(() => game.finish())));
+        $('end-session-button')?.addEventListener('click', () => confirmPanel('Finish this session?', 'This ends the aquarium and shows your results. To keep it for later instead, use Save & Return.', 'Finish session', () => act(() => game.finish())));
+    }
+    function updateSettingsStatus() {
+        if (panelKind !== 'settings' || $('tray').hidden) return;
+        setText('settings-save-warning', saveFailure);
+        $('settings-save-warning').hidden = !saveFailure;
+        const canReset = storageBlocked && lastSerialized !== null && !storageConflict;
+        $('reload-button').hidden = !storageConflict;
+        $('reset-save-button').hidden = !canReset;
+        $('settings-save-actions').hidden = !storageConflict && !canReset;
+        $('settings-graphics-warning').hidden = renderer.is3D && !renderer.lost;
+        if (!$('settings-graphics-warning').hidden) {
+            setText('settings-graphics-warning', renderer.lost
+                ? '3D graphics were interrupted. Your aquarium is paused while they recover.'
+                : 'WebGL 3D is unavailable. The aquarium is using a playable Canvas 2D perspective view.');
+        }
+        setText('settings-renderer', `${renderer.is3D ? 'WebGL 3D' : 'Canvas 2D compatibility'} \u00b7 ${renderer.level} quality`);
+        const inFile = location.protocol === 'file:';
+        const installed = appInstalled || matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+        const appleMobile = /iPad|iPhone|iPod/.test(navigator.userAgent)
+            || navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+        const canInstall = !installed && !inFile && window.isSecureContext && Boolean(installPrompt);
+        $('install-app').hidden = !canInstall;
+        setText('settings-install-status', installed ? 'Installed on this device.'
+            : inFile ? 'Installation is available from a secure web address, not a local file.'
+            : !window.isSecureContext ? 'App installation needs a secure web address.'
+            : canInstall ? 'Give your aquarium a place on this device.'
+            : appleMobile ? 'Use Share, then Add to Home Screen.'
+            : 'Use your browser\u2019s install command, if offered.');
+        setText('settings-offline-status', inFile ? 'Local-file play works without an internet connection.'
+            : offlineReady ? 'Ready for offline play.'
+            : 'serviceWorker' in navigator && window.isSecureContext ? 'An offline copy is not ready. Keep a connection for now.'
+            : 'Offline browser caching is unavailable here.');
     }
     async function toggleFullscreen() {
         try {
@@ -1044,6 +1103,9 @@ const ZQApp = (() => {
     function resize() {
         if (!renderer) return;
         renderer.resize();
+        const rect = $('viewport').getBoundingClientRect();
+        document.body.style.setProperty('--preview-top', `${rect.top}px`);
+        document.body.style.setProperty('--preview-bottom', `${Math.max(0, innerHeight - rect.top - rect.height)}px`);
         const scene = game || demo;
         if (scene) {
             scene.resize(renderer.width, renderer.height);
@@ -1183,7 +1245,7 @@ const ZQApp = (() => {
         if (event.key === 'Escape' && placement) { event.preventDefault(); clearPointers(); return; }
         if (event.key === 'Escape' && !$('tray').hidden) { event.preventDefault(); closePanel(); return; }
         if (['INPUT', 'SELECT', 'TEXTAREA'].includes(event.target.tagName) || event.target.isContentEditable) return;
-        if (['BUTTON', 'A'].includes(event.target.tagName) && [' ', 'Enter'].includes(event.key)) return;
+        if (['BUTTON', 'A', 'SUMMARY'].includes(event.target.tagName) && [' ', 'Enter'].includes(event.key)) return;
         if ($('panel').open) return;
         if (!game) return;
         const key = event.key.toLowerCase();
@@ -1251,6 +1313,7 @@ const ZQApp = (() => {
         try {
             registration = await navigator.serviceWorker.register('./sw.js', { scope: './', updateViaCache: 'none' });
             offlineReady = registration.active?.state === 'activated';
+            updateSettingsStatus();
             if (registration.waiting) $('update-button').hidden = false;
             const watch = worker => {
                 if (!worker) return;
@@ -1259,6 +1322,7 @@ const ZQApp = (() => {
                         if (registration.active && registration.waiting) $('update-button').hidden = false;
                     } else if (worker.state === 'activated') {
                         offlineReady = true;
+                        updateSettingsStatus();
                     } else if (worker.state === 'redundant') {
                         toast('The offline update did not finish. Your current aquarium is unchanged.', 'warning');
                     }
@@ -1272,22 +1336,26 @@ const ZQApp = (() => {
         }
     }
     async function install() {
-        if (!installPrompt) return;
+        const prompt = installPrompt;
+        if (!prompt) return;
         try {
-            await installPrompt.prompt();
-            await installPrompt.userChoice;
-            installPrompt = null;
-            if (panelKind === 'settings') showSettings();
+            await prompt.prompt();
+            await prompt.userChoice;
+            if (installPrompt === prompt) installPrompt = null;
+            updateSettingsStatus();
         } catch (error) {
             console.info('zq3d: the install prompt was not available.', error);
+            if (installPrompt === prompt) installPrompt = null;
+            updateSettingsStatus();
             toast('Use your browser menu to install, or Add to Home Screen on iPhone and iPad.');
         }
     }
     function bind() {
         $('begin-button').addEventListener('click', requestBegin);
         $('resume-button').addEventListener('click', () => begin(true));
-        $('home-button').addEventListener('click', () => { if (game) goHome(); });
-        $('journal-button').addEventListener('click', () => showJournal());
+        $('about-button').addEventListener('click', showAbout);
+        $('journal-button').addEventListener('click', () => showJournal('guide'));
+        $('progress-button').addEventListener('click', showProgress);
         $('settings-button').addEventListener('click', showSettings);
         $('sound-button').addEventListener('click', () => { settings.sound = !settings.sound; save(); syncAudio(true); });
         $('feed-button').addEventListener('click', feed);
@@ -1386,11 +1454,19 @@ const ZQApp = (() => {
         window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 100); });
         window.visualViewport?.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 100); });
         motionMedia.addEventListener('change', applyMotion);
-        window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; });
-        window.addEventListener('appinstalled', () => { installPrompt = null; toast('zq3d has a new home. Your aquarium is ready whenever you are.'); });
+        window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; updateSettingsStatus(); });
+        window.addEventListener('appinstalled', () => {
+            installPrompt = null; appInstalled = true;
+            updateSettingsStatus();
+            toast('Zenquarium 3D has a new home. Your aquarium is ready whenever you are.');
+        });
         $('update-button').addEventListener('click', () => {
-            if (!save()) { toast('Export a backup before reloading because this browser cannot save right now.', 'warning'); return; }
-            if (game) pause();
+            if (game && !game.state.ended) {
+                if (!goHome()) return;
+            } else if (!save()) {
+                toast('The update was not applied because your progress could not be saved. Check the saving warning before trying again.', 'warning');
+                return;
+            }
             if (registration?.waiting) {
                 navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
                 registration.waiting.postMessage({ type: 'ACTIVATE_UPDATE' });
@@ -1415,12 +1491,13 @@ const ZQApp = (() => {
         renderer.setQuality(settings.quality);
         applyMotion();
         $('theme-options').innerHTML = Object.values(ZQ.THEMES).map(theme =>
-            `<button class="theme-option" data-theme="${theme.id}" aria-pressed="${theme.id === selectedTheme}" aria-label="Preview ${theme.name}: ${theme.subtitle}">
-            <strong>${theme.name}</strong></button>`).join('');
+            `<button class="theme-option" data-theme="${theme.id}" aria-pressed="${theme.id === selectedTheme}" aria-label="Preview ${theme.name}: ${theme.subtitle}. ${theme.description}">
+            <span class="theme-copy"><strong>${theme.name}</strong><small class="theme-description">${theme.description}</small></span>${icon('check')}</button>`).join('');
         $('theme-options').querySelectorAll('[data-theme]').forEach(button => button.addEventListener('click', () => preview(button.dataset.theme, true)));
         new ResizeObserver(() => {
             document.body.style.setProperty('--care-height', `${$('care-alert').getBoundingClientRect().height}px`);
         }).observe($('care-alert'));
+        new ResizeObserver(resize).observe($('viewport'));
         bind();
         preview(selectedTheme);
         updateWelcome();
@@ -1434,7 +1511,7 @@ const ZQApp = (() => {
         $('begin-button').disabled = true;
         storageWarning('The aquarium could not start in this browser. Your saves are unchanged. Reload or try a browser with canvas support.');
     }
-    return { get game() { return game; }, get renderer() { return renderer; },
+    return { version: APP_VERSION, get game() { return game; }, get renderer() { return renderer; },
         get profile() { return profile; }, get settings() { return settings; },
         get offlineReady() { return offlineReady; }, save };
 })();

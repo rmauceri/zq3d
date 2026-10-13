@@ -16,7 +16,11 @@ w.performance.now = () => clock;
 w.requestAnimationFrame = callback => { frame = callback; return 1; };
 w.cancelAnimationFrame = () => { frame = null; };
 w.matchMedia = () => ({ matches: false, addEventListener() {} });
-w.ResizeObserver = class { observe() {} };
+const resizeObservers = new Map();
+w.ResizeObserver = class {
+    constructor(callback) { this.callback = callback; }
+    observe(target) { resizeObservers.set(target, this.callback); }
+};
 w.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
 w.HTMLDialogElement.prototype.show = function () { this.open = true; };
 w.HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new w.Event('close')); };
@@ -97,21 +101,164 @@ const swipe = (x, y, type = 'mouse') => {
     pointer('pointerup', x, y, 1, type);
 };
 const progress = () => evaluate('ZQApp.game.state.creature.defenseStep');
+const stored = () => JSON.parse(w.localStorage.getItem(evaluate('ZQ.STORAGE_KEY')));
+const returnHome = () => {
+    if (!evaluate('ZQApp.game.state.paused')) $('pause-button').click();
+    $('pause-home-button').click();
+};
 
 try {
     assert.equal($('preview-badge'), null);
     assert.equal($('renderer-label'), null);
+    assert($('resume-card').hidden && $('resume-button').hidden, 'An empty profile offered a saved aquarium');
+    const home = w.document.querySelector('.home-layout'), footer = home.querySelector('.welcome-footer');
+    assert.deepEqual([...home.children].map(node => node.className), ['site-header', 'preview-stage', 'welcome-footer']);
+    assert.equal(home.querySelector('.brand-name').textContent, 'Zenquarium 3D');
+    assert.equal(home.querySelector('.brand-tagline').textContent, 'A little world. A deeper calm.');
+    assert.equal($('about-button').getAttribute('aria-label'), 'About Zenquarium 3D');
+    assert.equal($('about-button').getAttribute('aria-haspopup'), 'dialog');
+    assert.match(w.document.title, /^Zenquarium 3D - /);
+    assert.equal(w.document.querySelector('meta[name="apple-mobile-web-app-title"]').content, 'Zenquarium 3D');
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.webmanifest'), 'utf8'));
+    assert.equal(manifest.name, 'Zenquarium 3D');
+    assert.equal(manifest.short_name, 'Zenquarium 3D');
+    assert.equal(manifest.id, './', 'The rebrand changed the installed app identity');
+    const artwork = new w.DOMParser().parseFromString(fs.readFileSync(path.join(root, 'icon.svg'), 'utf8'), 'image/svg+xml');
+    const logoPaths = [...artwork.querySelectorAll('#enso-mark > path')].map(node => node.getAttribute('d'));
+    assert.equal(logoPaths.length, 2, 'The Enso mark lost its ring or fish');
+    assert.deepEqual([...$('i-enso').querySelectorAll('path')].map(node => node.getAttribute('d')), logoPaths,
+        'The inline logo differs from the favicon artwork');
+    assert.equal($('about-button').querySelector('use').getAttribute('href'), '#i-enso');
+    assert.equal(w.document.querySelector('link[rel="icon"][type="image/png"]').getAttribute('href'), './icons/favicon-32.png');
+    for (const [name, size] of [['favicon-32.png', 32], ['icon-192.png', 192], ['icon-512.png', 512],
+        ['maskable-512.png', 512], ['apple-touch-icon.png', 180]]) {
+        const png = fs.readFileSync(path.join(root, 'icons', name));
+        assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', `${name} is not a PNG`);
+        assert.equal(png.readUInt32BE(16), size, `${name} has the wrong width`);
+        assert.equal(png.readUInt32BE(20), size, `${name} has the wrong height`);
+    }
+    for (const id of ['best-score', 'achievement-count', 'progress-button', 'resume-button']) {
+        assert(footer.contains($(id)), `${id} is not in the bottom rail`);
+    }
+    assert.equal($('resume-note'), null);
+    assert.equal(typeof resizeObservers.get(viewport), 'function');
+    resizeObservers.get(viewport)();
+    assert.equal(w.document.body.style.getPropertyValue('--preview-top'), '0px');
+    const picker = w.document.querySelector('.world-picker');
+    assert(picker.contains($('theme-options')) && picker.contains($('begin-button')),
+        'Theme selection and Start are not grouped together');
+    assert(!picker.contains($('resume-button')), 'Resume is mixed into the new-aquarium chooser');
+    assert.equal(footer.querySelector('.original-link'), null, 'The original-game link remains in the footer');
     const initialTheme = w.document.querySelector('.theme-option[aria-pressed="true"]');
+    const initialSave = w.localStorage.getItem(evaluate('ZQ.STORAGE_KEY'));
+    const initialProfile = evaluate('JSON.stringify(ZQApp.profile)');
+    $('about-button').focus();
+    $('about-button').click();
+    assert($('panel').open, 'The branding did not open About');
+    assert.equal($('panel-title').textContent, 'Zenquarium 3D');
+    const aboutHeading = $('panel').querySelector('.panel-heading');
+    assert(aboutHeading.contains($('panel-logo')) && !$('panel-logo').hidden);
+    assert.equal($('panel-logo').querySelector('use').getAttribute('href'), '#i-enso');
+    assert.equal($('panel-title').nextElementSibling, $('panel-version'));
+    assert(!$('panel-version').hidden && $('panel-eyebrow').hidden);
+    assert.equal($('about-close'), null, 'About still has a Done button');
+    assert.equal($('panel-content').firstElementChild, $('about-tagline'));
+    assert.equal($('about-tagline').textContent, 'A little world. A deeper calm.');
+    assert($('about-tagline').classList.contains('brand-tagline'));
+    assert.equal($('about-tagline').querySelector('span').textContent, 'A deeper calm.');
+    assert.equal($('about-tagline').nextElementSibling, $('about-description'));
+    assert.equal(w.document.activeElement, $('about-tagline'), 'About did not begin at its tagline');
+    assert.match(evaluate('ZQApp.version'), /^\d+\.\d+\.\d+$/);
+    assert.equal($('app-version').textContent, evaluate('ZQApp.version'));
+    assert($('panel-content').textContent.includes('Created with care. No accounts, telemetry, or external services.'));
+    assert(!/GitHub Pages|IP addresses/.test($('panel-content').textContent), 'About assumes an online hosting provider');
+    const originalLink = $('panel-content').querySelector('.original-link');
+    assert.equal(originalLink.href, 'https://rmauceri.github.io/zenquarium');
+    assert.equal(originalLink.target, '_blank');
+    assert(originalLink.relList.contains('noopener'));
+    assert.equal(evaluate('ZQApp.game'), null, 'Opening About started a game');
+    assert.equal(evaluate('JSON.stringify(ZQApp.profile)'), initialProfile, 'Opening About changed progress');
+    assert.equal(w.localStorage.getItem(evaluate('ZQ.STORAGE_KEY')), initialSave, 'Opening About changed the save');
+    assert.equal(frame, null, 'About did not suspend the preview');
+    const outsideAbout = new w.MouseEvent('pointerdown', { bubbles: true, cancelable: true });
+    w.document.body.dispatchEvent(outsideAbout);
+    assert(!$('panel').open && outsideAbout.defaultPrevented, 'About did not consume its outside-dismiss tap');
+    $('about-button').click();
+    $('panel').dispatchEvent(new w.Event('cancel', { cancelable: true }));
+    assert(!$('panel').open, 'Escape did not dismiss About');
+    console.log('PASS Zenquarium 3D branding opens About with version, privacy and original-game link without changing progress');
+    $('progress-button').focus();
+    $('progress-button').click();
+    assert.equal($('tray').dataset.kind, 'progress');
+    assert.equal($('tray-title').textContent, 'Your progress.');
+    assert.equal($('tray-content').querySelectorAll('.session-stats > div').length, 6);
+    assert.equal($('tray-content').querySelectorAll('[data-achievement]').length, 20);
+    assert.equal(evaluate('ZQApp.game'), null, 'Opening progress started a game');
+    assert.equal(w.localStorage.getItem(evaluate('ZQ.STORAGE_KEY')), initialSave, 'Opening progress changed the save');
+    key('keydown', 'Escape');
+    assert($('tray').hidden);
+    assert.equal(w.document.activeElement, $('progress-button'), 'Closing progress lost its trigger focus');
+    $('journal-button').click();
+    assert.equal($('tray-content').querySelector('[data-tab="guide"]').getAttribute('aria-pressed'), 'true');
+    key('keydown', 'Escape');
+    console.log('PASS Persistent home rails retain branding and stats; Details opens lifetime progress without starting or saving');
     for (const button of w.document.querySelectorAll('.theme-option')) {
+        const previewBeforeHover = $('scene-name').textContent;
+        button.dispatchEvent(new w.MouseEvent('mouseover', { bubbles: true }));
+        assert.equal($('scene-name').textContent, previewBeforeHover, 'Hovering changed the preview');
+        assert.equal(evaluate('ZQApp.game'), null, 'Hovering started a game');
         button.click();
         const theme = evaluate(`ZQ.THEMES['${button.dataset.theme}']`);
         assert.equal($('scene-name').textContent, theme.name);
         assert.equal($('scene-subtitle').textContent, theme.subtitle);
         assert.equal($('scene-description').textContent, theme.description);
+        assert.equal(w.document.documentElement.style.getPropertyValue('--cp-aquarium-accent'),
+            (theme.welcomeUi || theme.ui).accent, 'The preview ignored the configured accent');
+        assert.equal($('begin-label').textContent, 'Start');
+        assert.equal(button.querySelector('.theme-description').textContent, theme.description);
+        assert(button.getAttribute('aria-label').includes(theme.description));
+        assert.equal(button.getAttribute('aria-pressed'), 'true');
+        assert.equal(w.document.querySelectorAll('.theme-option[aria-pressed="true"]').length, 1);
+        assert.equal(button.querySelector('use').getAttribute('href'), '#i-check');
+        assert.equal(evaluate('ZQApp.game'), null, 'Previewing a theme started a game');
+        assert.equal(w.localStorage.getItem(evaluate('ZQ.STORAGE_KEY')), initialSave, 'Previewing wrote a save');
     }
     initialTheme.click();
-    console.log('PASS Welcome preview identifies each selected world with its name and two descriptive lines, without a renderer badge');
+    console.log('PASS Theme selection, preview, checkmark and grouped Start label agree; hover does not select or launch');
     $('begin-button').click(); pump(2);
+    const initialGame = JSON.parse(evaluate('JSON.stringify(ZQApp.game.snapshot())'));
+    assert.equal(initialGame.themeId, initialTheme.dataset.theme);
+    assert.equal(stored().session, null, 'Starting created an automatic resume point');
+    assert.equal(evaluate('ZQApp.save()'), true);
+    assert.equal(stored().session, null, 'A routine save stored the live aquarium');
+    returnHome();
+    assert(!$('resume-card').hidden && !$('resume-button').hidden);
+    const resumeLabel = 'Resume last session';
+    assert.equal($('resume-button').textContent, resumeLabel);
+    assert.equal($('resume-button').getAttribute('aria-label') || $('resume-button').textContent, resumeLabel);
+    const savedAquarium = w.localStorage.getItem(evaluate('ZQ.STORAGE_KEY'));
+    assert.equal(stored().session.elapsed, initialGame.elapsed);
+    assert.equal(stored().session.paused, true);
+    $('about-button').click();
+    assert.equal(evaluate('ZQApp.game'), null);
+    assert.equal(w.localStorage.getItem(evaluate('ZQ.STORAGE_KEY')), savedAquarium, 'About replaced the resumable aquarium');
+    $('panel').dispatchEvent(new w.Event('cancel', { cancelable: true }));
+    for (const button of w.document.querySelectorAll('.theme-option')) {
+        button.click();
+        assert.equal($('begin-label').textContent, 'Start');
+        assert.equal($('resume-button').textContent, resumeLabel, 'A preview changed the Resume destination');
+        assert.equal(w.localStorage.getItem(evaluate('ZQ.STORAGE_KEY')), savedAquarium, 'A preview changed the saved round');
+        assert.equal(evaluate('ZQApp.game'), null);
+    }
+    $('resume-button').click();
+    assert.equal(stored().session, null, 'Resuming did not consume the saved slot');
+    assert.equal(evaluate('ZQApp.game.state.themeId'), initialGame.themeId, 'Resume started the previewed theme');
+    assert.equal(evaluate('ZQApp.game.state.elapsed'), initialGame.elapsed);
+    assert.equal(evaluate('JSON.stringify(ZQApp.game.state.fish.map(f => [f.id, f.sex, f.health, f.hunger]))'),
+        JSON.stringify(initialGame.fish.map(f => [f.id, f.sex, f.health, f.hunger])));
+    assert.equal(evaluate('ZQApp.profile.sessions'), 0, 'Returning to a saved aquarium finished the round');
+    returnHome(); initialTheme.click(); $('resume-button').click();
+    console.log('PASS Resume last session stays independent of the preview and preserves saved residents and active time');
     spawn('octopus');
     const yaw = evaluate('ZQApp.renderer.camera.yaw');
     pointer('pointerdown', 600, 400); pointer('pointerup', 600, 400);
@@ -237,10 +384,10 @@ try {
     assert(!$('encounter-hint').textContent.includes('drag left or right'), 'Feedback did not expire');
     swipe(600, 300); key('keydown', ' '); key('keydown', ' '); pump(2);
     assert(!$('encounter-hint').textContent.includes('drag left or right'), 'Pause/resume retained stale feedback');
-    swipe(600, 300); $('home-button').click(); $('resume-button').click(); pump(2);
+    swipe(600, 300); returnHome(); $('resume-button').click(); pump(2);
     assert(!$('encounter-hint').textContent.includes('drag left or right'), 'Saved encounter inherited old feedback');
     evaluate('ZQApp.game.state.elapsed=200');
-    swipe(600, 300); $('home-button').click(); $('begin-button').click(); pump(2);
+    swipe(600, 300); returnHome(); $('begin-button').click(); pump(2);
     spawn('eel');
     assert(evaluate('ZQApp.game.state.elapsed < 1'));
     assert(!$('encounter-hint').textContent.toLowerCase().includes('crab'), 'Restarted clock prolonged stale feedback');
@@ -411,7 +558,7 @@ try {
     key('keydown', 't'); w.document.querySelector('[data-prize-move="chest"]').click();
     key('keydown', 'ArrowRight');
     assert(evaluate('!!ZQApp.renderer.prizePreview'));
-    $('home-button').click();
+    returnHome();
     assert(!evaluate('ZQApp.renderer.prizePreview'), 'Welcome demo inherited a placement preview');
     $('resume-button').click(); pump(1);
     assert.deepEqual(evaluate('ZQApp.game.state.prizePositions.chest.slice()'), afterDrag);
@@ -419,7 +566,7 @@ try {
     key('keydown', 'f'); key('keydown', 'i');
     assert($('placement-controls').hidden, 'Immersion hid the controls but kept an active placement');
     key('keydown', 'i');
-    $('home-button').click(); $('begin-button').click(); pump(1);
+    returnHome(); $('begin-button').click(); pump(1);
     assert.equal(evaluate('Object.keys(ZQApp.game.state.prizes).length'), 0);
     assert.equal(evaluate('ZQApp.game.state.equippedPrizes.length'), 0);
     key('keydown', 't');
@@ -435,13 +582,15 @@ try {
     assert($('tray').hidden, 'Score details did not light-dismiss');
     assert.equal(evaluate('ZQApp.game.state.stats.taps'), tapsBeforeDismiss);
 
-    $('home-button').click();
+    returnHome();
     $('begin-button').click();
     assert(!$('panel').open && evaluate('ZQApp.game !== null'), 'Entering a new aquarium added a confirmation');
     $('menu-button').click();
     w.document.querySelector('[data-menu-action="settings"]').click();
     $('end-session-button').click();
     assert($('panel').open, 'Finish-session confirmation was not modal');
+    assert($('panel-logo').hidden && $('panel-version').hidden && !$('panel-eyebrow').hidden,
+        'About branding leaked into the confirmation heading');
     $('panel').getBoundingClientRect = () => ({ left: 300, right: 900, top: 200, bottom: 600 });
     $('panel').dispatchEvent(new w.MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 500, clientY: 300 }));
     assert($('panel').open, 'An inside tap dismissed the confirmation');
@@ -454,10 +603,11 @@ try {
     $('end-session-button').click();
     $('panel').dispatchEvent(new w.Event('cancel', { cancelable: true }));
     assert(!$('panel').open, 'Escape did not cancel confirmation');
-    $('home-button').click();
+    returnHome();
     w.document.querySelector('[data-theme="ink"]').click();
     assert.equal(w.document.documentElement.dataset.theme, 'dark', 'Pen & Ink welcome screen became light');
     assert.equal(w.document.documentElement.style.getPropertyValue('--cp-aquarium-bg'), '#0b1420');
+    assert.equal(w.document.documentElement.style.getPropertyValue('--cp-aquarium-accent'), '#c4a1ed');
     $('resume-button').click(); pump(1);
     evaluate('ZQApp.game.state.creature=null; ZQApp.game.state.attacks=[]; ZQApp.game.state.score=2500; ZQApp.game.state.milestones=["bronze"]; ZQApp.game.state.pending=null');
     pump(75);
@@ -467,7 +617,7 @@ try {
     const milestoneTime = evaluate('ZQApp.game.state.elapsed');
     pump(10);
     assert(evaluate('ZQApp.game.state.elapsed') > milestoneTime, 'Milestone stopped simulation time');
-    $('home-button').click(); $('resume-button').click(); pump(1);
+    returnHome(); $('resume-button').click(); pump(1);
     assert(!$('milestone-notice').hidden && !evaluate('ZQApp.game.state.paused'), 'Resumed milestone restored a blocking pause');
     $('feed-button').click(); key('keydown', 'Escape');
     $('milestone-continue').click();
@@ -483,6 +633,7 @@ try {
     $('begin-button').click(); pump(1);
     assert.equal(evaluate('ZQApp.game.theme.id'), 'ink');
     assert.equal(w.document.documentElement.dataset.theme, 'light', 'Pen & Ink lost its in-tank palette');
+    assert.equal(w.document.documentElement.style.getPropertyValue('--cp-aquarium-accent'), '#735096');
     console.log('PASS Confirmations, summaries, and score trays light-dismiss; milestones keep playing with one-click choices; Ink welcome stays dark');
     const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
     const opacity = Number(css.match(/--cp-panel: color-mix\(in srgb, var\(--cp-aquarium-bg\) (\d+)%, transparent\)/)[1]) / 100;
@@ -508,6 +659,15 @@ try {
             assert(contrast >= 4.5, `${theme.id}: panel text contrast fell to ${contrast}`);
         }
     }
+    for (const palette of evaluate('[ZQ.THEMES.ink.ui, ZQ.THEMES.ink.welcomeUi]')) {
+        for (const background of [palette.bg, palette.surface]) {
+            const a = luminance(rgb(palette.accent)), b = luminance(rgb(background));
+            const contrast = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+            assert(contrast >= 4.5, `Pen & Ink's lavender accent contrast fell to ${contrast}`);
+        }
+    }
+    assert.equal(evaluate('ZQ.THEMES.ink.water'), '#858aaa');
+    assert.equal(evaluate('ZQ.THEMES.ink.surface'), '#c9cfe1');
     console.log('PASS Catalog, score, menu, and dialogs share readable translucency with 4.5:1 text contrast across themes');
     spawn('eel');
     evaluate(`ZQApp.renderer.project = () => ({ x: -100, y: 400, scale: 50, visible: false });
@@ -574,7 +734,7 @@ try {
     assert(!$('restart-button'), 'Redundant Restart button remains');
     $('pause-button').click();
     const profileBeforeBegin = evaluate('JSON.stringify(ZQApp.profile)');
-    $('home-button').click();
+    returnHome();
     w.document.querySelector('[data-theme="deep"]').click();
     $('begin-button').click();
     assert(!$('panel').open, 'Entering a selected world asked for redundant confirmation');
@@ -600,7 +760,7 @@ try {
     key('keydown', 'Escape');
     assert.equal(w.document.activeElement.id, 'score-button');
     console.log('PASS Single-button fish shop, direct Zen/pause/volume, collapsible bar and immediate world entry preserve progress and light dismiss');
-    $('home-button').click();
+    returnHome();
     w.document.querySelector('[data-theme="ink"]').click();
     $('begin-button').click(); pump(1);
     const setupDispute = () => evaluate(`{
@@ -627,8 +787,11 @@ try {
     assert.equal(evaluate('ZQApp.game.state.creature.holdCharge'), 0, 'Protective tap started an overlapping eel hold');
     assert.equal(captures.size, 0);
     assert($('social-hint').hidden);
-    const protectedSave = JSON.parse(w.localStorage.getItem(evaluate('ZQ.STORAGE_KEY')));
+    assert.equal(stored().session, null, 'A protective glass tap created a resume point');
+    returnHome();
+    const protectedSave = stored();
     assert(protectedSave.session.fish.every(f => f.sex === 'male' && f.socialCooldown === 90));
+    $('resume-button').click();
     setupDispute();
     evaluate(`{
         const g=ZQApp.game, random=g.random, index=g.theme.visitors.findIndex(v=>v.kind==='eel');
@@ -661,6 +824,7 @@ try {
     console.log('PASS Rival cues, touch and keyboard separation take priority over overlapping visitors without stress; drags and cancelled/multitouch gestures stay safe');
     setupDispute(); pump(1);
     w.dispatchEvent(new w.Event('pagehide'));
+    assert.equal(stored().session, null, 'Backgrounding saved the running round without Save & Return');
     const socialPaused = evaluate('JSON.stringify(ZQApp.game.snapshot())');
     assert($('social-hint').hidden);
     pump(30);
@@ -706,6 +870,117 @@ try {
     assert.equal($('toast').dataset.kind, 'loss', 'Birth announcements displaced urgent loss information');
     assert.equal($('toast').textContent, 'A resident was lost');
     console.log('PASS Real births announce the baby and bonus without pausing; routine rewards do not replace them and urgent loss still takes priority');
+
+    $('menu-button').click();
+    w.document.querySelector('[data-menu-action="settings"]').click();
+    assert.equal($('tray-title').textContent, 'Settings');
+    assert(!$('settings-display').open && !$('settings-install').open);
+    for (const id of ['setting-sound', 'setting-volume', 'setting-motion']) {
+        assert(!$(id).closest('details'), `${id} is hidden among device options`);
+    }
+    assert.equal($('setting-quality').closest('details'), $('settings-display'));
+    assert.equal($('setting-quality').querySelector('[value="auto"]').textContent, 'Automatic');
+    assert(!$('export-button') && !$('import-button') && !$('import-file'));
+    assert(!$('tray-content').textContent.includes('Created with care'));
+    assert.equal(Boolean($('setting-awake')), 'wakeLock' in w.navigator);
+    assert.equal(Boolean($('fullscreen-button')),
+        Boolean(w.document.fullscreenElement || w.document.fullscreenEnabled && w.document.documentElement.requestFullscreen));
+    const displaySummary = $('settings-display').querySelector('summary');
+    displaySummary.focus();
+    for (const activation of [' ', 'Enter']) {
+        const event = new w.KeyboardEvent('keydown', { key: activation, bubbles: true, cancelable: true });
+        displaySummary.dispatchEvent(event);
+        assert(!event.defaultPrevented, 'An aquarium shortcut blocked native details activation');
+        assert(!evaluate('ZQApp.game.state.paused'), 'Opening device options paused the aquarium');
+    }
+    $('settings-display').open = true;
+    $('setting-quality').value = 'battery';
+    $('setting-quality').dispatchEvent(new w.Event('change', { bubbles: true }));
+    $('setting-motion').value = 'reduced';
+    $('setting-motion').dispatchEvent(new w.Event('change', { bubbles: true }));
+    assert.equal(evaluate('ZQApp.renderer.level'), 'battery');
+    assert(evaluate('ZQApp.renderer.reduced'));
+    assert($('settings-display').open, 'Changing a preference collapsed the section');
+    assert.equal(stored().settings.quality, 'battery');
+    assert.equal(stored().settings.motion, 'reduced');
+    assert.equal(stored().session, null, 'Changing preferences saved the live round');
+    evaluate('ZQApp.renderer.is3D=false');
+    $('setting-volume').dispatchEvent(new w.Event('input', { bubbles: true }));
+    assert(!$('settings-graphics-warning').hidden && !$('settings-graphics-warning').closest('details'));
+    assert($('settings-graphics-warning').textContent.includes('Canvas 2D'));
+    evaluate('ZQApp.renderer.is3D=true');
+    $('setting-volume').dispatchEvent(new w.Event('input', { bubbles: true }));
+    assert($('settings-graphics-warning').hidden);
+    const secureContext = Object.getOwnPropertyDescriptor(w, 'isSecureContext');
+    Object.defineProperty(w, 'isSecureContext', { value: true, configurable: true });
+    const installOffer = new w.Event('beforeinstallprompt', { cancelable: true });
+    w.dispatchEvent(installOffer);
+    assert(installOffer.defaultPrevented && !$('install-app').hidden);
+    w.dispatchEvent(new w.Event('appinstalled'));
+    assert($('install-app').hidden);
+    assert.equal($('settings-install-status').textContent, 'Installed on this device.');
+    assert.notEqual($('settings-offline-status').textContent, 'Ready for offline play.',
+        'Installation falsely claimed the offline copy was ready');
+    if (secureContext) Object.defineProperty(w, 'isSecureContext', secureContext);
+    else delete w.isSecureContext;
+    key('keydown', 'Escape');
+    console.log('PASS Settings prioritize sound/motion, retain device preferences, and keep errors and install/offline state distinct');
+
+    const runningRound = evaluate('ZQApp.game'), storageKey = evaluate('ZQ.STORAGE_KEY');
+    const originalWrite = w.Storage.prototype.setItem;
+    w.Storage.prototype.setItem = function (key, value) {
+        if (key === storageKey && JSON.parse(value).session !== null) {
+            throw new w.DOMException('No room for the aquarium snapshot', 'QuotaExceededError');
+        }
+        return originalWrite.call(this, key, value);
+    };
+    try {
+        returnHome();
+        assert.equal(evaluate('ZQApp.game'), runningRound, 'Failed Save & Return abandoned the live round');
+        assert(evaluate('ZQApp.game.state.paused'));
+        assert.equal(w.document.body.dataset.screen, 'game');
+        assert.equal(stored().session, null);
+        assert(!$('save-warning').hidden);
+        $('menu-button').click();
+        w.document.querySelector('[data-menu-action="settings"]').click();
+        assert(!$('settings-save-warning').hidden && !$('settings-save-warning').closest('details'));
+        $('setting-volume').value = '37';
+        $('setting-volume').dispatchEvent(new w.Event('input', { bubbles: true }));
+        assert.equal(stored().settings.volume, 0.37, 'A failed session save blocked independent progress writes');
+        assert(!$('save-warning').hidden && !$('settings-save-warning').hidden,
+            'A stats-only write hid a failed session save');
+    } finally {
+        w.Storage.prototype.setItem = originalWrite;
+    }
+    key('keydown', 'Escape');
+    $('pause-home-button').click();
+    assert.equal(evaluate('ZQApp.game'), null);
+    assert(stored().session && !$('resume-button').hidden);
+    assert($('save-warning').hidden, 'A successful retry did not clear the session-save warning');
+    const keptRound = stored().session;
+    $('settings-button').click();
+    $('setting-volume').value = '61';
+    $('setting-volume').dispatchEvent(new w.Event('input', { bubbles: true }));
+    assert.deepEqual(stored().session, keptRound, 'Home preferences replaced the explicitly saved round');
+    key('keydown', 'Escape');
+    $('resume-button').click();
+    assert.equal(stored().session, null);
+    assert.equal(evaluate('ZQApp.settings.volume'), 0.61);
+    console.log('PASS Failed session saves stay paused and visible; retry saves one round and home preferences preserve it');
+
+    const newerSave = JSON.stringify({ ...stored(), writer: 'another-window' });
+    w.localStorage.setItem(storageKey, newerSave);
+    w.dispatchEvent(new w.StorageEvent('storage', { key: storageKey, newValue: newerSave, storageArea: w.localStorage }));
+    assert(evaluate('ZQApp.game.state.paused'));
+    $('pause-home-button').click();
+    assert(evaluate('ZQApp.game'), 'A stale window claimed to save and return');
+    assert.equal(w.localStorage.getItem(storageKey), newerSave);
+    assert.equal(evaluate('ZQApp.save()'), false);
+    $('menu-button').click();
+    w.document.querySelector('[data-menu-action="settings"]').click();
+    assert(!$('reload-button').hidden && $('reset-save-button').hidden);
+    assert(!$('settings-save-warning').hidden);
+    console.log('PASS Stale windows cannot save over another window and expose reload rather than destructive reset');
 } finally {
     dom.window.close();
 }

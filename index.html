@@ -7,8 +7,8 @@
     <meta name="description" content="A little world. A deeper calm. A living 3D aquarium with five worlds to explore, handcrafted soundscapes, and the heart of Zenquarium. Offline, private, and free of distractions.">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="zq3d">
-    <title>zq3d - A little world. A deeper calm.</title>
+    <meta name="apple-mobile-web-app-title" content="Zenquarium 3D">
+    <title>Zenquarium 3D - A little world. A deeper calm.</title>
     <script>
       (() => {
         const param = new URLSearchParams(window.location.search).get("clawpilotTheme");
@@ -73,6 +73,7 @@
     </style>
     <link rel="stylesheet" href="./styles.css">
     <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./icons/favicon-32.png" type="image/png" sizes="32x32">
     <link rel="icon" href="./icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
     <script src="./core.js" defer></script>
@@ -83,6 +84,7 @@
 <body data-screen="welcome">
     <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <defs>
+            <symbol id="i-enso" viewBox="64 64 384 384" fill="currentColor" stroke="none"><path d="M 382 120 C 341 77 273 63 218 74 C 124 88 63 171 74 265 C 84 365 163 441 261 438 C 338 437 405 388 433 322 C 442 300 447 274 440 252 C 435 280 426 300 410 319 C 375 367 322 394 264 396 C 182 399 120 343 111 267 C 102 190 155 124 226 110 C 283 99 329 111 366 142 C 375 149 387 143 389 136 C 391 130 388 124 382 120 Z"/><path d="M 354 245 C 318 196 261 186 214 225 L 165 194 C 173 219 173 259 165 286 L 214 259 C 258 294 317 286 354 245 Z"/></symbol>
             <symbol id="i-fish" viewBox="0 0 24 24"><path d="M3 12c4-7 11-7 15 0-4 7-11 7-15 0Z"/><path d="m18 12 4-5v10l-4-5ZM8 7l3-3 3 3M8 17l3 3 3-3"/><circle cx="7.5" cy="11" r=".7"/></symbol>
             <symbol id="i-wave" viewBox="0 0 24 24"><path d="M2 8c3-4 5 4 9 0s6 4 11 0M2 13c3-4 5 4 9 0s6 4 11 0M2 18c3-4 5 4 9 0s6 4 11 0"/></symbol>
             <symbol id="i-sound" viewBox="0 0 24 24"><path d="m11 4-5 4H3v8h3l5 4V4ZM15 8c3 2 3 6 0 8M18 5c5 4 5 10 0 14"/></symbol>
@@ -111,52 +113,56 @@
             <symbol id="i-lantern" viewBox="0 0 24 24"><path d="M6 8h12v12H6V8Zm-2 0 8-5 8 5M4 21h16M12 3V1"/><path d="M12 11c-4 5-3 7 0 7s4-2 0-7Z"/></symbol>
             <symbol id="i-arch" viewBox="0 0 24 24"><path d="M3 21V11a9 9 0 0 1 18 0v10h-5V11a4 4 0 0 0-8 0v10H3ZM3 16h5m8 0h5M3 11h5m8 0h5M6 4l3 4m9-4-3 4M12 2v5"/></symbol>
             <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+            <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
         </defs>
     </svg>
 
-    <header class="site-header">
-        <button class="brand" id="home-button" aria-label="zq3d home">
-            <span class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#i-fish"/></svg></span>
-            <span>zq<span class="brand-dimension">3d</span><small>A ZENQUARIUM EXPERIENCE</small></span>
-        </button>
-        <nav class="header-actions" aria-label="Application">
-            <button class="quiet-button" id="journal-button" aria-label="Open field guide"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg><span class="wide-label">Field guide</span></button>
-            <button class="quiet-button" id="sound-button" aria-pressed="false" aria-label="Enable sound"><svg class="icon" aria-hidden="true"><use href="#i-muted"/></svg><span id="sound-label" class="wide-label">Sound off</span></button>
-            <button class="quiet-button icon-button" id="settings-button" aria-label="Settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg></button>
-        </nav>
-    </header>
-
-    <div id="viewport" class="world" tabindex="0" role="region" aria-label="Aquarium. Drag to orbit, or use arrow keys.">
-        <div id="scene-caption" class="scene-caption" aria-live="polite" aria-atomic="true">
-            <strong id="scene-name">Tropical Reef</strong>
-            <span id="scene-subtitle">Life in full color</span>
-            <span id="scene-description">Sunlit coral and curious reef fish.</span>
-        </div>
-        <p class="gesture-hint" id="gesture-hint"><svg class="icon" aria-hidden="true"><use href="#i-orbit"/></svg> Drag to explore <span aria-hidden="true">/</span> Scroll or pinch to move closer</p>
-    </div>
-
-    <main id="welcome">
-        <section class="intro" aria-labelledby="welcome-title">
-            <p class="eyebrow"><span class="small-rule"></span> A NEW DIMENSION OF CALM</p>
-            <h1 id="welcome-title">A little world.<br> <em>A deeper calm.</em></h1>
-            <p class="intro-description">Tend a little life. Let the outside world wait.</p>
-            <div class="intro-detail"><svg class="icon" aria-hidden="true"><use href="#i-wave"/></svg><span>Five worlds. Entirely yours.</span></div>
-            <div class="begin-row">
-                <button class="primary-button" id="begin-button" disabled>Enter aquarium <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
-                <button class="secondary-button" id="resume-button" hidden>Resume aquarium</button>
-                <p class="privacy-note">No accounts. No ads. Just a little care.</p>
+    <div class="home-layout">
+        <header class="site-header">
+            <div class="brand-group">
+                <button class="brand" id="about-button" aria-label="About Zenquarium 3D" aria-haspopup="dialog" aria-controls="panel" title="About Zenquarium 3D">
+                    <span class="brand-mark"><svg class="icon" aria-hidden="true"><use href="#i-enso"/></svg></span>
+                    <span class="brand-name">Zenquarium <span class="brand-dimension">3D</span></span>
+                </button>
+                <p class="brand-tagline">A little world. <span>A deeper calm.</span></p>
             </div>
-            <div class="lifetime-stats" aria-label="Your progress">
+            <nav class="header-actions" aria-label="Application">
+                <button class="quiet-button" id="journal-button" aria-label="Open field guide"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg><span class="wide-label">Field guide</span></button>
+                <button class="quiet-button" id="sound-button" aria-pressed="false" aria-label="Enable sound"><svg class="icon" aria-hidden="true"><use href="#i-muted"/></svg><span id="sound-label" class="wide-label">Sound off</span></button>
+                <button class="quiet-button icon-button" id="settings-button" aria-label="Settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg></button>
+            </nav>
+        </header>
+
+        <div class="preview-stage">
+            <div id="viewport" class="world" tabindex="0" role="region" aria-label="Aquarium. Drag to orbit, or use arrow keys.">
+                <div id="scene-caption" class="visually-hidden" aria-live="polite" aria-atomic="true">
+                    <strong id="scene-name">Tropical Reef</strong>
+                    <span id="scene-subtitle">Life in full color</span>
+                    <span id="scene-description">Sunlit coral and curious reef fish.</span>
+                </div>
+            </div>
+            <main id="welcome">
+                <section class="world-picker" aria-labelledby="welcome-title">
+                    <h1 id="welcome-title" class="visually-hidden">Choose your world.</h1>
+                    <div id="theme-options" class="theme-options" role="group" aria-label="Theme for a new aquarium"></div>
+                    <div class="begin-row">
+                        <button class="primary-button" id="begin-button" disabled><span id="begin-label">Start</span> <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <footer class="welcome-footer" aria-label="Your progress and saved aquarium">
+            <div class="lifetime-stats">
                 <div><strong id="best-score">0</strong><span>PERSONAL BEST</span></div>
                 <div><strong id="achievement-count">0 <small>/ 20</small></strong><span>DISCOVERIES</span></div>
+                <button class="quiet-button progress-link" id="progress-button" aria-label="View detailed progress">Details <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
             </div>
-            <a class="original-link" href="../index.html">Looking for the original Zenquarium? <span aria-hidden="true">&nearr;</span></a>
-        </section>
-        <section class="world-picker" aria-labelledby="picker-title">
-            <div class="picker-heading"><h2 id="picker-title">Choose your world</h2></div>
-            <div id="theme-options" class="theme-options" role="group" aria-label="Aquarium theme"></div>
-        </section>
-    </main>
+            <div class="resume-card" id="resume-card" hidden>
+                <button class="secondary-button" id="resume-button" hidden>Resume last session</button>
+            </div>
+        </footer>
+    </div>
 
     <section id="game-ui" aria-label="Aquarium controls" hidden>
         <div class="game-hud">
@@ -179,9 +185,9 @@
         <div class="pause-card" id="pause-card" hidden>
             <span class="eyebrow">A MOMENT TO YOURSELF</span>
             <h2>Taking a breath.</h2>
-            <p id="pause-reason">Your aquarium is safely paused. Nothing changes while you are away.</p>
+            <p id="pause-reason">Your aquarium is paused. Use Save &amp; Return before closing to keep this session.</p>
             <button class="primary-button" id="unpause-button"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> Resume aquarium</button>
-            <button class="quiet-button" id="pause-home-button">Save &amp; return home</button>
+            <button class="quiet-button" id="pause-home-button">Save &amp; Return</button>
         </div>
         <button id="menu-button" class="aquarium-menu-button icon-button" title="Aquarium menu (M)" aria-label="Aquarium menu" aria-expanded="false" aria-controls="tray"><svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
         <div class="command-controls">
@@ -213,9 +219,16 @@
         <div id="catalog-content" class="panel-content"></div>
     </dialog>
     <dialog id="panel" class="panel" aria-labelledby="panel-title">
-        <div class="panel-heading"><div><span class="eyebrow" id="panel-eyebrow">YOUR AQUARIUM</span><h2 id="panel-title">Field guide</h2></div></div>
+        <div class="panel-heading">
+            <span id="panel-logo" aria-hidden="true" hidden><svg class="icon"><use href="#i-enso"/></svg></span>
+            <div class="panel-heading-text">
+                <span class="eyebrow" id="panel-eyebrow">YOUR AQUARIUM</span>
+                <h2 id="panel-title">Field guide</h2>
+                <p id="panel-version" hidden>Version <span id="app-version"></span></p>
+            </div>
+        </div>
         <div id="panel-content" class="panel-content"></div>
     </dialog>
-    <noscript><div class="no-script">zq3d needs JavaScript to bring your aquarium to life. Enable it in your browser, then reload. No downloads or accounts are required.</div></noscript>
+    <noscript><div class="no-script">Zenquarium 3D needs JavaScript to bring your aquarium to life. Enable it in your browser, then reload. No downloads or accounts are required.</div></noscript>
 </body>
 </html>

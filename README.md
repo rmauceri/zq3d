@@ -1,10 +1,14 @@
-# zq3d
+# Zenquarium 3D
 
 **A little world. A deeper calm.**
 
 A standalone, dependency-free 3D aquarium with the heart of
 [Zenquarium](https://github.com/rmauceri/zenquarium). This repository is independent
-of the original game.
+of the original game. The repository and published URL retain the project name
+`zq3d`; the app is named **Zenquarium 3D**.
+
+The About box shows app version **0.1.0**, defined by `APP_VERSION` in `app.js`.
+This is separate from the save schema and offline-shell cache versions.
 
 ## Open the aquarium
 
@@ -28,8 +32,19 @@ all app assets and the worker scope are relative.
 The service worker preloads the complete application, including PNG install icons.
 After a successful first visit, installed or browser-tab sessions can reload
 offline. Updates wait for **Save & reload**, rather than replacing a running game.
+That explicit action saves the current aquarium through the same path as
+**Save & Return**, then reloads with **Resume last session** available.
 Before publishing changes to any precached application file, increment the shell
 version in `sw.js`. Documentation-only changes do not require a cache-version bump.
+
+The Enso fish mark is shared by the header, About, favicon, and install icons.
+`icon.svg` is the artwork source; `tools/generate-icons.ps1` synchronizes its
+inline UI symbol and generates the 32px fallback favicon, 192px/512px app icons,
+512px maskable icon, and 180px Apple touch icon. This uses only Windows
+System.Drawing, not a browser or the aquarium renderer. The UI mark follows the
+selected theme; the SVG favicon supports light/dark browser chrome. PNGs use the
+high-contrast neutral palette, with full-bleed backgrounds for Apple and maskable
+icons and the maskable mark kept inside the central 80%-diameter safe circle.
 
 ### Publishing and moving between devices
 
@@ -37,9 +52,9 @@ GitHub Pages publishes the repository root from `main`. The `.nojekyll` file
 keeps the static application unchanged, and pushes to `main` automatically
 redeploy to **https://rmauceri.github.io/zq3d/** over HTTPS.
 
-Saves are local to each browser/device, not synchronized through GitHub. To move
-an aquarium from local-file testing or another device, export its JSON backup
-in Settings and restore it in the destination browser or installed app.
+Progress is local to each browser/device, not synchronized through GitHub.
+There is no backup/restore or cross-device transfer feature. Local-file play,
+the hosted website, and different browsers can have separate progress.
 
 ## A different perspective, the same principles
 
@@ -113,14 +128,32 @@ in Settings and restore it in the destination browser or installed app.
   buttons, prizes, settings, and the field guide. Menu's child panels stay
   anchored beneath the same upper-right button. Health-widget panels and their
   child screens stay beneath the upper-left health widget.
-  The preview identifies the selected world at its top with the theme name and
-  two short descriptive lines, retained on small screens instead of a renderer badge.
-  Phones and small tablets use a preview-first welcome screen with brief copy
-  and a single-line portrait title that leaves more room for the aquarium,
-  all five world choices visible without scrolling, and side-by-side preview/content in
-  landscape, with a narrow introduction pane and unnumbered world choices.
-  Enter aquarium starts the selected world directly; Resume keeps the saved
-  aquarium. Starting anew records the previous session while preserving
+  The start page has persistent top and bottom rails in every orientation.
+  **Zenquarium 3D** and **A little world. A deeper calm.** sit at the upper left,
+  with the guide, sound, and Settings controls at the upper right. Clicking the
+  icon and title opens About, with the Enso logo left of **Zenquarium 3D** and
+  the app version directly underneath the title. The themed tagline introduces
+  the description, privacy notes, and
+  [original Zenquarium](https://rmauceri.github.io/zenquarium) link below.
+  About dismisses with an outside tap or Escape, without a Done button.
+  The bottom rail keeps personal best, discoveries, **Details**, and
+  **Resume last session** outside the tank. Details opens lifetime session
+  statistics and the full discovery collection without starting an aquarium.
+  The preview fills the space between those rails. Only the five theme tiles and
+  a compact **Start &rarr;** button float over its lower edge. Tiles include their
+  descriptions when space allows and use compact names in small or short layouts.
+  Uncovered water remains draggable; the controls can scroll within the preview
+  if enlarged text needs more room.
+  The selected tile has a checkmark; mouse hover adds an accent outline and a
+  gentle lift, disabled by either system or in-game reduced-motion preferences.
+  Choosing or hovering over a world never starts it; only selecting it changes
+  the preview.
+  **Resume last session** appears only when an aquarium is saved and always
+  returns to that aquarium, regardless of the preview selection.
+  Start opens the selected world directly; Resume keeps the saved aquarium.
+  Starting or resuming consumes the saved slot. Use **Save & Return** again to
+  keep the running aquarium; ordinary closing or reloading does not keep it.
+  Starting anew records the previous session while preserving
   achievements and best scores. The in-tank dock uses a single compact icon-and-label row without
   secondary descriptions, retaining 44-pixel touch targets and clear water
   status. Safe-area spacing keeps controls clear of device edges.
@@ -130,6 +163,13 @@ in Settings and restore it in the destination browser or installed app.
   residents, status, settings, the field guide, prizes, and confirmations.
   Panels and flyouts use outside-tap/Escape dismissal without redundant close
   icons. Cancel remains available for confirmations.
+  **Settings** keeps sound, volume, and motion preferences up front.
+  **Display & battery** is collapsed by default and contains visual quality,
+  supported screen-awake/fullscreen controls, and renderer details.
+  Automatic quality is the default recommendation; existing preferences remain
+  intact. **Install & offline** provides contextual guidance, distinguishing
+  installation from an offline-ready copy. Saving failures, recovery actions,
+  and graphics fallback notices stay outside collapsed sections.
   Routine discoveries and bonuses accumulate in **Recent moments**, rather
   than repeated popups. Feed, clean, orbit, or defend a resident without
   dismissing a tray. Critical care remains available alongside non-interactive,
@@ -226,7 +266,12 @@ the aquarium remains visible while text and quieter descriptions stay readable.
 Nested cards use a light tint instead of stacking opaque backgrounds; no
 expensive backdrop blur is used.
 Pen & Ink keeps a dark welcome-screen palette like the other themes, switching
-to its artistic light palette only inside the aquarium. Excessive glass tapping
+to its artistic light palette only inside the aquarium. Its lavender accent
+recalls the male Glass Catfish and distinguishes it from Zen Garden's warm gold.
+The welcome palette uses a soft lavender, while the light in-tank palette uses
+a deeper shade for legibility; both palettes live in the theme definition.
+Its water and surface have a subtle lavender cast, shared by WebGL and the
+compatibility renderer. Fish, sand, rocks, plants, and gameplay are unchanged. Excessive glass tapping
 still causes stress. Creature defenses never count as glass taps.
 
 Glass taps are the primary interaction, not a shortcut into fish details. A tap
@@ -432,13 +477,18 @@ or an invulnerability mode.
 ## Device, privacy, and offline behavior
 
 - A versioned, validated localStorage envelope at **`zenquarium_zq3d_v1`** holds
-  settings, discoveries, statistics, and a complete resumable aquarium.
-  The stable key now contains schema version 10. This development update
-  deliberately requires a fresh aquarium rather than migrating earlier saves.
-  An explicit notice directs you to **Settings → Start fresh aquarium**.
-  Earlier data stays untouched until you confirm resetting zq3d; export first
-  if you want a backup. Resetting removes the previous aquarium and discoveries.
-- Saves include fish traits, growth, hunger, health, destinations, food, visitor
+  settings, discoveries, statistics, and at most one explicitly saved aquarium.
+  The stable key still contains schema version 10. Existing valid version-10
+  saves remain usable, including their last aquarium. Earlier formats still
+  require an explicit **Settings → Reset local progress** rather than migration.
+  Unreadable or incompatible data stays untouched until that confirmation.
+  Resetting removes only this app's saved aquarium, lifetime stats, and discoveries.
+- **Save & Return** keeps the last aquarium and returns to the start screen.
+  **Resume last session** consumes that saved slot; save explicitly again before
+  leaving if you want to keep playing it later. Starting a new aquarium or
+  finishing a round also clears the slot. Closing or reloading without explicitly
+  saving leaves no resumable round, but does not erase lifetime progress.
+- Explicit session saves include fish traits, growth, hunger, health, destinations, food, visitor
   state, live hazards, seeded randomness, sex, social cooldowns, courtships,
   territorial disputes, breeding timers, and pending milestones.
   Challenge phases, defense progress, prize unlocks, placements, active
@@ -448,13 +498,17 @@ or an invulnerability mode.
   Encounter warnings, defense progress, and electric-pulse hit records persist.
   Active holds are cancelled when pausing or reloading. Social encounters resume
   with their saved phase and remaining intervention window, not wall-clock time.
-- Autosaves happen every 12 active seconds, on important actions, and when
-  backgrounding. **Time does not advance while away.**
+- Lifetime progress and preferences save every 12 active seconds, on important
+  actions, and when backgrounding; these writes do not save a running aquarium.
+  A backgrounded tab keeps its paused round in memory until it is closed or
+  reloaded. **Time does not advance while away.**
 - Returning from the background requires explicit resume. Rendering and sound
   are suspended; screen wake lock is opt-in and released while inactive.
 - Malformed saves are left untouched. Storage denial or capacity errors are
-  visible; Settings can export/restore JSON backups. Concurrent windows pause
-  instead of silently overwriting a newer save.
+  visible. If **Save & Return** cannot store the round, it stays open and paused,
+  rather than falsely claiming it was saved. A later stats-only write does not
+  hide that failed session save. Concurrent windows pause instead of silently
+  overwriting a newer save; reset confirmation also checks for changed data.
 - Quality automatically steps down on slower rendering. Manual High, Balanced,
   and 30-FPS Battery Saver are available. Device reduced-motion preferences are
   respected and can be overridden.
@@ -485,7 +539,7 @@ cleanup to its `zenquarium-` caches; this repository does not modify that app.
 | `audio.js` | Procedural audio, routing, event sounds and lifecycle |
 | `app.js` | Input, UI, persistence, install/update flow and lifecycle |
 | `manifest.webmanifest`, `sw.js`, `icons/` | Separate PWA identity and offline shell |
-| `tools/generate-icons.ps1` | Reproducible PNG icon generation on Windows |
+| `icon.svg`, `tools/generate-icons.ps1` | Enso artwork source, inline logo synchronization, and reproducible PNG icon generation on Windows |
 | `tests/core.test.js`, `tests/run-core.js`, `tests/verify.py` | Non-browser simulation/renderer-math checks and optional browser coverage |
 
 The UI retains the shared `--cp-*` design tokens, populated by the selected

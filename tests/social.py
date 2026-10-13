@@ -200,10 +200,10 @@ try:
                 old = page.evaluate("localStorage.getItem(ZQ.STORAGE_KEY)")
                 page.reload()
                 page.wait_for_function("typeof ZQApp !== 'undefined' && ZQApp.renderer")
-                assert "fresh aquarium" in page.locator("#save-warning").inner_text()
+                assert "Reset local progress" in page.locator("#save-warning").inner_text()
                 assert page.evaluate("localStorage.getItem(ZQ.STORAGE_KEY)") == old
                 page.locator("#settings-button").click()
-                assert page.locator("#reset-save-button").inner_text() == "Start fresh aquarium"
+                assert page.locator("#reset-save-button").inner_text() == "Reset local progress"
                 page.locator("#reset-save-button").click()
                 page.locator("#cancel-action").click()
                 assert page.evaluate("localStorage.getItem(ZQ.STORAGE_KEY)") == old

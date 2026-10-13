@@ -1,7 +1,7 @@
 {
   "id": "./",
-  "name": "zq3d - A Zenquarium Experience",
-  "short_name": "zq3d",
+  "name": "Zenquarium 3D",
+  "short_name": "Zenquarium 3D",
   "description": "A little world. A deeper calm. A private, offline 3D aquarium.",
   "lang": "en",
   "start_url": "./index.html",

@@ -117,8 +117,9 @@ const ZQ = (() => {
             id: 'ink', name: 'Pen & Ink', subtitle: 'An aquarium, imagined',
             description: 'Paper, fine lines, and living color.',
             location: 'THE ARTIST\'S AQUARIUM', sound: 'Impressionist piano',
-            ui: { bg: '#e8e0d4', surface: '#f5f0e8', text: '#1a1a1a', accent: '#2a2a2a' },
-            water: '#6d90a6', surface: '#c0d7df', sand: '#dec49b', rock: '#626c77',
+            ui: { bg: '#e8e0d4', surface: '#f5f0e8', text: '#1a1a1a', accent: '#735096' },
+            welcomeUi: { bg: '#0b1420', surface: '#172838', text: '#e8dcc8', accent: '#c4a1ed' },
+            water: '#858aaa', surface: '#c9cfe1', sand: '#dec49b', rock: '#626c77',
             light: '#fff2d8', plants: ['#335c50', '#56715b', '#735b78', '#976e44'],
             fish: [
                 fish('ink-betta', 'Brushstroke Betta', 20, 1.1, 0.65, 'betta', ['curious', 'lazy'], '#cfaaa9', '#725777', '#362b48', 0, 0.3),
@@ -2133,7 +2134,7 @@ const ZQ = (() => {
         const milestones = MILESTONES.map(m => m.id);
         const prizeIds = PRIZES.map(p => p.id);
         record(data, 'save');
-        if (data.version !== VERSION) throw new Error('This development save predates fish sexes and social encounters. Start a fresh zq3d aquarium from Settings; the old save has not been changed.');
+        if (data.version !== VERSION) throw new Error('This save uses a different development format. Review Reset local progress in Settings; the old save has not been changed.');
         record(data.profile, 'profile');
         const p = data.profile;
         num(p.highScore, 0, 1e12, 'best score');
