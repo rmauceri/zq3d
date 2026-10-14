@@ -139,9 +139,23 @@ the hosted website, and different browsers can have separate progress.
   the description, privacy notes, and
   [original Zenquarium](https://rmauceri.github.io/zenquarium) link below.
   About dismisses with an outside tap or Escape, without a Done button.
-  The bottom rail keeps personal best, discoveries, **Details**, and
-  **Resume last session** outside the tank. Details opens lifetime session
-  statistics and the full discovery collection without starting an aquarium.
+  The bottom rail keeps personal best, discoveries, **Progress**, and
+  **Resume last session** outside the tank. Progress opens personal records
+  and the discovery collection without starting an aquarium.
+  Personal-best score, highest milestone, and largest population lead the
+  records, followed by worlds visited, babies born, and discoveries. Completed
+  sessions and the longest completed session sit under **More statistics**;
+  an ongoing aquarium counts as progress without having to end it.
+  Genuinely new players see a short welcome and an approachable **Try next**
+  discovery instead of a grid of zeros. Earned discoveries appear newest first,
+  with the remaining collection collapsed under **Still to discover**.
+  Discovery tiles use compact rows: icon, name, and bonus or discovery date share
+  a wrapping header above the description, with no repeated status line.
+  Tighter spacing reduces scrolling without shrinking the text.
+  The Field guide shares this collection and its optional suggestion, without
+  new quests, deadlines, or rewards. **Your aquarium > Lifetime progress**
+  opens the same live panel in-game. Records and discoveries carry across
+  aquariums on this device; points and tank prizes belong to each aquarium.
   The preview fills the space between those rails. Only the five theme tiles and
   a compact **Start &rarr;** button float over its lower edge. Tiles include their
   descriptions when space allows and use compact names in small or short layouts.
@@ -167,6 +181,18 @@ the hosted website, and different browsers can have separate progress.
   residents, status, settings, the field guide, prizes, and confirmations.
   Panels and flyouts use outside-tap/Escape dismissal without redundant close
   icons. Cancel remains available for confirmations.
+  The Field guide opens with a short **How to play** introduction, followed by
+  brief, expandable care, defense, breeding, scoring, prize, touch-control, and saving
+  sections. Instructions focus on enjoyable play on smaller touch screens, not
+  implementation details; all keyboard shortcuts are collected in one final section.
+  Scoring explanations are shared with the aquarium dashboard's **How scoring works**,
+  including the unmultiplied quick-defense reward and fading milestones.
+  There is no compulsory tutorial or additional navigation button.
+  On the start page, Guide, Settings, Progress, and the sound flyout keep both
+  the visible preview and the chosen soundtrack running. About remains a modal
+  overlay that suspends animation and audio until dismissed.
+  These panels stay between the home rails, with scrolling content and narrow-panel
+  reflow for tabs, settings, and statistics rather than smaller text.
   The start-page sound control and in-tank Volume button share one mute/volume
   flyout. Muting keeps the selected volume. **Settings** starts with Motion
   and contains no duplicate audio controls or session-ending actions.
@@ -176,14 +202,26 @@ the hosted website, and different browsers can have separate progress.
   intact. **Install & offline** provides contextual guidance, distinguishing
   installation from an offline-ready copy. Saving failures, recovery actions,
   and graphics fallback notices stay outside collapsed sections.
-  Routine discoveries and bonuses accumulate in **Recent moments**, rather
-  than repeated popups. Brief notifications share a vertically centered top row
+  Each of the twenty discoveries receives a brief **New discovery** message
+  with its actual, streak-adjusted bonus, as well as an entry in **Recent moments**
+  and the lifetime collection. Simultaneous discoveries queue individually;
+  other notifications take priority without discarding an interrupted discovery.
+  Hidden tabs and modal panels defer these notices until they are visible again.
+  Successful **Save & Return** and completed-session exits clear active and
+  queued notices, keeping Start quiet; their discovery records remain saved.
+  A failed Save & Return keeps the aquarium, warning, and pending notices intact.
+  The end-of-aquarium summary acknowledges that aquarium's new discoveries;
+  discoveries earned while replacing a saved aquarium are identified as belonging
+  to the previous aquarium, not as points added to the new one.
+  Routine repeatable bonuses stay in Recent moments rather than repeated popups.
+  Brief notifications share a vertically centered top row
   with the status and menu controls, centered in the space between them.
   Small portrait screens (up to 600 pixels wide) use a wider, centered second
   message row below the controls. Other exceptionally cramped layouts also
   move messages below the controls rather than overlap.
   Saving warnings stay separate above the row. Milestones use the same message
-  area and fade after 4.5 seconds; ignoring them never pauses play or blocks later
+  area and fade after 4.5 seconds; a new highest milestone is identified as a
+  personal record. Ignoring notices never pauses play or blocks later
   milestones. Feed, clean, orbit, or defend a resident without
   dismissing a tray. Critical care remains available alongside non-interactive,
   creature-specific defense hints.
@@ -250,7 +288,8 @@ the hosted website, and different browsers can have separate progress.
 | Reset camera | Menu > **Camera**; `R` |
 | Inspect / follow | Aquarium dashboard > **Residents**; choose **Follow** |
 | Stop following | Menu > **Camera** > **Stop following**; drag to orbit |
-| Status / progress | Compact points-and-condition control opens **Your aquarium** |
+| Aquarium status | Compact points-and-condition control opens **Your aquarium** |
+| Lifetime progress | Start-page **Progress** or **Your aquarium > Lifetime progress** |
 | Fend off jellyfish, squid, or octopus | Press on it, drag outward, release; three swipes. Keyboard: `X` |
 | Defend against a crab | Press on it and alternate left/right swipes three times. Keyboard: `J`, `L`, `J` (or `L`, `J`, `L`) |
 | Defend against an eel | Press and hold on it for 0.7 seconds during its 2.6-second coil warning. Keyboard: hold `H` |
@@ -263,7 +302,7 @@ the hosted website, and different browsers can have separate progress.
 | Sound and volume | Shared start-page Sound or command-bar Volume flyout |
 | Save and exit | Menu or pause card > **Save & Return** |
 
-Routine trays do **not** stop simulation, mute audio, cover the aquarium with a
+Routine in-game trays do **not** stop simulation, mute audio, cover the aquarium with a
 backdrop, or trap keyboard focus. The fish catalog is a separate light-dismiss,
 non-modal dialog; it stays live for repeated purchases and shows previews,
 prices, and capacity. Outside dismissal consumes that tap rather than tapping
@@ -482,7 +521,8 @@ the original code and documents disagree, zq3d uses the documented behavior:
 
 - Purchase prices are the existing **per-species** values, including the
   Tropical Reef's 10-point Neon Tetra, not the old generic "Buy Fish: 15" table.
-- Positive bonuses receive the current multiplier; costs and penalties do not.
+- Positive bonuses receive the current multiplier except the quick-defense
+  reward; costs and penalties do not.
 - First Fish requires a purchase, rather than being awarded for the starter fish.
 - Perfect Tank checks all resident fish above 90% health with at least five fish.
 - Clean Sweep checks water above 70% **before** the cleaning action.
@@ -574,6 +614,11 @@ cleanup to its `zenquarium-` caches; this repository does not modify that app.
 | `icon.svg`, `tools/generate-icons.ps1` | Enso artwork source, inline logo synchronization, and reproducible PNG icon generation on Windows |
 | `tests/core.test.js`, `tests/run-core.js`, `tests/verify.py` | Non-browser simulation/renderer-math checks and optional browser coverage |
 
+The proposed [scenic containment plan](scenic-containment-plan.md) describes a
+Tropical Reef-first approach to a more sheltered habitat, including camera and
+performance constraints, review gates, and the development handoff. Scenery
+implementation has not started; Fish Rescue remains deferred.
+
 The UI retains the shared `--cp-*` design tokens, populated by the selected
 Zenquarium palette on both the welcome screen and in play: warm koi colors,
 tropical greens, deep-ocean blues, quiet charcoal/copper, or parchment and ink.
@@ -614,6 +659,17 @@ directory if it is installed outside the repository, then run
 keyboard defenses, cancellation, camera isolation, and hint-only encounter UI
 against the real simulation with graphics/audio stubs. It also checks feedback
 ownership through creature replacement, queued events, pause/resume, and restart.
+Home-panel coverage checks that the preview and soundtrack keep running without
+changing the profile or retained aquarium, including display changes and returning
+from the background; About still suspends both.
+Guide coverage checks concise touch-first sections, grouped keyboard shortcuts,
+native disclosure controls, shared scoring copy, and live in-game reading.
+Lifetime-progress coverage distinguishes a new profile from an ongoing aquarium,
+checks live personal records and shared discovery ordering, and covers every
+discovery's acknowledgement, simultaneous unlocks, interruptions, and completion.
+Exit coverage checks that failed saves retain pending acknowledgements while
+successful exits clear the queue and timer without removing earned discoveries.
+These changes retain the existing save schema and once-per-profile rewards.
 
 Browser verification is optional and should only be launched when explicitly
 desired; local visual review can be done by opening `index.html` in Edge.
@@ -651,6 +707,10 @@ It also exercises whole-row catalog purchases, command-bar hide/show, direct
 Zen care, pause and volume controls, residents,
 settings, progress, prizes, discoveries, the field guide, confirmations, pause,
 and session summaries, checking panel bounds, scrolling, and touch targets.
+Home reading panels are also checked with expanded references, rotation, and
+enlarged text while retaining the persistent rails and readable touch targets.
+Discovery tiles are checked for compact height, full descriptions, and readable
+text at normal and enlarged sizes in both home and in-game panels.
 
 `python .\tests\social.py` checks actual WebGL and forced Canvas rendering for
 male markings on every species, requiring substantial color contrast over at

@@ -25,6 +25,50 @@ def press_chevron_without_shift(page):
     after = toggle.bounding_box()
     assert abs(after["x"] + after["width"] / 2 - center) <= 0.5, "Chevron loses horizontal center after toggle"
 
+def check_home_reader(page):
+    page.evaluate("""() => {
+        const tray=document.getElementById('tray'), box=tray.getBoundingClientRect();
+        const body=document.getElementById('tray-content');
+        const header=document.querySelector('.site-header').getBoundingClientRect();
+        const footer=document.querySelector('.welcome-footer').getBoundingClientRect();
+        if(tray.hidden || box.left<0 || box.right>innerWidth ||
+           box.top<header.bottom || box.bottom>footer.top)
+            throw Error('Home reader covers a persistent rail or leaves the viewport');
+        if(body.clientHeight<44 || body.scrollWidth>body.clientWidth+1)
+            throw Error('Home reader has no usable scrolling area or overflows horizontally');
+        for(const node of tray.querySelectorAll('button,summary,select,input')) {
+            if(!node.getClientRects().length || node.closest('details:not([open])') && node.tagName!=='SUMMARY') continue;
+            const r=node.getBoundingClientRect();
+            const desktopCheckbox=innerWidth>1100 && node.matches('input[type="checkbox"]');
+            if(!desktopCheckbox && (r.width<44 || r.height<44))
+                throw Error('Small home reader touch target: '+(node.id || node.textContent));
+        }
+        const scroll=body.scrollTop;
+        body.scrollTop=body.scrollHeight;
+        if(body.scrollHeight>body.clientHeight && body.scrollTop===0)
+            throw Error('Cannot reach the end of the home reader');
+        body.scrollTop=scroll;
+        if(ZQApp.game!==null) throw Error('Reading started an aquarium');
+    }""")
+
+def check_discovery_tiles(page):
+    page.evaluate("""() => {
+        const rootSize=parseFloat(getComputedStyle(document.documentElement).fontSize);
+        for(const card of document.querySelectorAll('.discovery-collection .achievement')) {
+            if(!card.getClientRects().length || card.closest('details:not([open])')) continue;
+            const box=card.getBoundingClientRect(), title=card.querySelector('h3'), description=card.querySelector('p');
+            if(!card.querySelector('.achievement-top').contains(title) || card.querySelector('small'))
+                throw Error('Discovery metadata is spread over redundant rows');
+            if(card.scrollWidth>card.clientWidth+1 || card.scrollHeight>card.clientHeight+1)
+                throw Error('A compact discovery tile clips its contents');
+            if(parseFloat(getComputedStyle(title).fontSize)<rootSize*0.81 ||
+               parseFloat(getComputedStyle(description).fontSize)<rootSize*0.81)
+                throw Error('Discovery tiles were tightened by shrinking their text');
+            if(rootSize<=16.01 && box.width>=260 && box.height>100)
+                throw Error('A compact discovery row still takes excessive vertical space');
+        }
+    }""")
+
 
 class QuietHandler(SimpleHTTPRequestHandler):
     def log_message(self, *_args):
@@ -253,6 +297,56 @@ try:
                 assert page.evaluate("ZQApp.settings.volume") == volume_before
                 page.keyboard.press("Escape")
                 assert page.locator("#sound-button").evaluate("button => button===document.activeElement")
+            for width, height, text_size in [(320, 480, "100%"), (480, 320, "100%"),
+                                              (412, 915, "200%"), (915, 412, "200%"),
+                                              (1024, 768, "200%"), (1440, 900, "100%")]:
+                page.set_viewport_size({"width": width, "height": height})
+                page.evaluate("(size) => document.documentElement.style.fontSize=size", text_size)
+                page.wait_for_timeout(200)
+                reader_save = page.evaluate("localStorage.getItem(ZQ.STORAGE_KEY)")
+                for trigger in ["#journal-button", "#settings-button", "#progress-button"]:
+                    page.locator(trigger).click()
+                    check_home_reader(page)
+                    if trigger == "#journal-button":
+                        assert page.locator("#tray [data-tab='guide']").inner_text() == "How to play"
+                        assert page.locator("#tray details[open]").count() == 0
+                        page.locator("#guide-care > summary").focus()
+                        page.keyboard.press("Enter")
+                        assert page.locator("#guide-care").evaluate("node => node.open")
+                        assert page.locator(".guide-intro p").first.evaluate("node => parseFloat(getComputedStyle(node).fontSize)") >= (26 if text_size == "200%" else 13)
+                    page.evaluate("document.querySelectorAll('#tray details').forEach(node => node.open=true)")
+                    check_home_reader(page)
+                    if trigger == "#journal-button":
+                        page.locator("#tray [data-tab='achievements']").click()
+                        page.locator("#remaining-discovery-count").click()
+                        check_home_reader(page)
+                        check_discovery_tiles(page)
+                    if trigger == "#progress-button":
+                        assert page.locator("#progress-welcome").is_visible()
+                        assert not page.locator("#progress-records").is_visible()
+                        assert page.locator("#next-discovery-name").inner_text() == "First Fish"
+                        check_home_reader(page)
+                        check_discovery_tiles(page)
+                    assert page.evaluate("localStorage.getItem(ZQ.STORAGE_KEY)") == reader_save, "Home reading changed the save"
+                    page.keyboard.press("Escape")
+                    assert page.locator(trigger).evaluate("node => node===document.activeElement"), "Home reader lost its trigger focus"
+                print(f"PASS Home readers reflow between rails at {width}x{height}, text {text_size}", flush=True)
+            page.evaluate("document.documentElement.style.fontSize=''")
+            page.locator("#journal-button").click()
+            page.locator("#guide-defenses > summary").click()
+            for width, height in [(412, 915), (915, 412)]:
+                page.set_viewport_size({"width": width, "height": height})
+                page.wait_for_timeout(200)
+                check_home_reader(page)
+                assert page.locator("#guide-defenses").evaluate("node => node.open"), "Rotation collapsed the guide"
+                page.evaluate("""() => {
+                    const world=document.getElementById('viewport').getBoundingClientRect();
+                    if(Math.abs(ZQApp.renderer.width-world.width)>2 || Math.abs(ZQApp.renderer.height-world.height)>2)
+                        throw Error('The live preview did not resize after rotation');
+                }""")
+            page.keyboard.press("Escape")
+            page.set_viewport_size({"width": 1920, "height": 1080})
+            page.wait_for_timeout(200)
             page.emulate_media(reduced_motion="no-preference")
             page.mouse.move(0, 0)
             tile = page.locator(".theme-option").first
@@ -490,8 +584,8 @@ try:
                         throw Error('Zen button did not enable care');
                 }""")
                 page.locator("#zen-button").click()
-                for action in ["residents", "score", "prizes", "settings", "journal", "activity"]:
-                    if action in ["residents", "score", "prizes", "activity"]:
+                for action in ["residents", "score", "prizes", "settings", "journal", "activity", "progress"]:
+                    if action in ["residents", "score", "prizes", "activity", "progress"]:
                         page.locator("#score-button").click()
                         if action != "score":
                             page.locator(f"[data-menu-action='{action}']").click()
@@ -511,7 +605,16 @@ try:
                         page.evaluate("checkCompactPanel('#tray')")
                     if action == "journal":
                         page.locator("[data-tab='achievements']").click()
+                        page.evaluate("document.getElementById('remaining-discoveries').open=true")
                         page.evaluate("checkCompactPanel('#tray')")
+                        check_discovery_tiles(page)
+                    if action == "progress":
+                        assert page.locator("#tray").get_attribute("data-anchor") == "health"
+                        assert page.locator("#progress-records").is_visible()
+                        assert not page.locator("#progress-welcome").is_visible()
+                        page.evaluate("document.querySelectorAll('#tray details').forEach(node => node.open=true)")
+                        page.evaluate("checkCompactPanel('#tray')")
+                        check_discovery_tiles(page)
                     page.keyboard.press("Escape")
                 page.locator("#pause-button").click()
                 page.evaluate("""() => {
@@ -586,7 +689,10 @@ try:
                     const opacity=Number(getComputedStyle(document.getElementById('toast')).opacity);
                     return opacity>0 && opacity<0.8;
                 }""",timeout=1000)
-                page.wait_for_function("document.getElementById('toast').hidden",timeout=1500)
+                page.wait_for_function("""() => {
+                    const t=document.getElementById('toast');
+                    return t.hidden || t.dataset.kind!=='milestone';
+                }""",timeout=1500)
                 assert page.evaluate("!ZQApp.game.state.paused && !ZQApp.game.state.ended && !ZQApp.game.state.milestone")
                 assert page.evaluate("ZQApp.game.state.elapsed")>elapsed+4
             print("PASS Bronze, Silver, Gold and Platinum fade in the shared top row while ignored milestones keep progressing",flush=True)

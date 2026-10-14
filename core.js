@@ -861,7 +861,8 @@ const ZQ = (() => {
             if (!def) throw new Error('Unknown achievement.');
             this.profile.achievements[id] = new Date().toISOString().slice(0, 10);
             this.state.newAchievements.push(id);
-            this.award(def.bonus, def.name, 'achievement');
+            const amount = this.award(def.bonus);
+            this.emit('achievement', `New discovery: ${def.name}`, { achievement: id, amount });
             return true;
         }
         buy(type) {
@@ -2029,8 +2030,9 @@ const ZQ = (() => {
                     s.milestones.push(s.milestone);
                     s.pending = null;
                     const rank = MILESTONES.findIndex(m => m.id === s.milestone);
-                    if (rank > MILESTONES.findIndex(m => m.id === this.profile.bestMilestone)) this.profile.bestMilestone = s.milestone;
-                    this.emit('milestone', MILESTONES[rank].name);
+                    const personalBest = rank > MILESTONES.findIndex(m => m.id === this.profile.bestMilestone);
+                    if (personalBest) this.profile.bestMilestone = s.milestone;
+                    this.emit('milestone', `${MILESTONES[rank].name}${personalBest ? ' \u2014 new highest milestone!' : ' achieved!'}`);
                 }
             }
         }

@@ -95,6 +95,30 @@
         equal(next.state.score, 85);
         equal(g.state.stats.bought, 2);
     });
+    test('Every discovery emits its name and actual bonus once per profile, including after resume', () => {
+        for (const discovery of core.ACHIEVEMENTS) {
+            const g = make('koi', core.createProfile());
+            g.drainEvents();
+            g.state.multiplier = 3;
+            const before = g.state.score;
+            assert(g.unlock(discovery.id), `Missing unlock for ${discovery.id}`);
+            const events = g.drainEvents();
+            equal(events.length, 1);
+            equal(events[0], { type: 'achievement', message: `New discovery: ${discovery.name}`,
+                achievement: discovery.id, amount: discovery.bonus * 3 });
+            equal(g.state.score, before + discovery.bonus * 3);
+            equal(g.state.newAchievements, [discovery.id]);
+            equal(g.state.activity.at(-1), { type: 'achievement', message: events[0].message,
+                time: g.state.elapsed, amount: events[0].amount });
+            assert(!g.unlock(discovery.id), `Repeated reward for ${discovery.id}`);
+            equal(g.drainEvents(), []);
+            const loaded = core.validateSave(envelope(g));
+            const resumed = new core.Game('koi', loaded.profile, { snapshot: loaded.session });
+            assert(!resumed.unlock(discovery.id), `Resume repeated ${discovery.id}`);
+            equal(resumed.drainEvents(), []);
+            equal(resumed.state.score, g.state.score);
+        }
+    });
     test('Unaffordable, invalid, over-capacity, paused, and ended purchases do not change balance', () => {
         const g = make();
         g.state.score = 0;
@@ -240,6 +264,22 @@
         assert(!g.state.milestone);
         equal(g.profile.bestMilestone, 'bronze');
     });
+    test('Milestone messages distinguish a new lifetime record from a repeated milestone', () => {
+        const g = make();
+        g.profile.bestMilestone = 'silver';
+        for (const id of ['bronze', 'silver', 'gold']) {
+            const milestone = core.MILESTONES.find(m => m.id === id);
+            g.state.score = milestone.score;
+            g.progression(1);
+            const events = g.drainEvents().filter(event => event.type === 'milestone');
+            equal(events.length, 1);
+            equal(events[0].message, `${milestone.name}${id === 'gold' ? ' \u2014 new highest milestone!' : ' achieved!'}`);
+            assert(g.state.activity.some(entry => entry.type === 'milestone' && entry.message === events[0].message));
+            equal(g.profile.bestMilestone, id === 'gold' ? 'gold' : 'silver');
+            assert(!g.state.paused);
+            g.continueMilestone();
+        }
+    });
     test('Master requires fifteen residents, four species, and three continuous minutes', () => {
         const g = make();
         g.state.milestones = ['bronze', 'silver', 'gold', 'platinum'];
@@ -259,6 +299,8 @@
         equal(p.highScore, 300);
         equal(p.sessions, 1);
         assert(p.achievements.pacifist);
+        assert(g.drainEvents().some(event => event.type === 'achievement' && event.achievement === 'pacifist'
+            && event.message === 'New discovery: Pacifist' && event.amount === 200));
         g.finish();
         equal(p.sessions, 1);
         equal(g.state.score, 300);

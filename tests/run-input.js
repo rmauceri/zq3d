@@ -46,7 +46,8 @@ const ZQRenderer = { fishPreview: RendererMath.fishPreview, PARAMS: { camera: { 
     resize() {} setTheme() {} setQuality(level) { this.level = level; }
     worldPoint(x,y) { return [(x-600)/80,(400-y)/100,(y-400)/100]; }
     sandPoint(x,y,floor) { return y<100 ? null : [(x-600)/40,floor,(y-600)/40]; }
-    render() {} sampleFrame() {}
+    render(state, time) { this.renderCount = (this.renderCount || 0) + 1; this.renderedState = state; this.renderTime = time; }
+    sampleFrame() {}
     project() { return { x:600, y:400, scale:50, visible:true }; }
     pick(state,x,y) {
         if(state.creature && Math.hypot(x-600,y-400)<60) return {kind:'creature',entity:state.creature};
@@ -58,10 +59,12 @@ const ZQRenderer = { fishPreview: RendererMath.fishPreview, PARAMS: { camera: { 
     orbit(dx,dy) { this.camera.yaw += dx; this.camera.pitch += dy; this.camera.follow = null; }
     zoom(amount) { this.camera.zoom *= amount; }
 }};
-const audioEffects = [];
+const audioEffects = [], audioCalls = [];
 const ZQAudio = { Soundscape: class {
-    suspend() { return Promise.resolve(); } disable() { return Promise.resolve(); }
-    enable() { return Promise.resolve(); } setVolume() {} effect(type, pan) { audioEffects.push({ type, pan }); }
+    suspend() { audioCalls.push('suspend'); return Promise.resolve(); }
+    disable() { audioCalls.push('disable'); return Promise.resolve(); }
+    enable() { this.context = {}; audioCalls.push('enable'); return Promise.resolve(); }
+    setVolume() {} effect(type, pan) { audioEffects.push({ type, pan }); }
 }};
 `);
 const viewport = w.document.getElementById('viewport'), captures = new Set();
@@ -199,8 +202,21 @@ try {
     $('progress-button').click();
     assert.equal($('tray').dataset.kind, 'progress');
     assert.equal($('tray-title').textContent, 'Your progress.');
+    assert.equal($('progress-button').textContent.trim(), 'Progress');
+    assert(!$('progress-welcome').hidden, 'A genuinely new profile has no welcome');
+    assert($('progress-records').hidden && $('completed-sessions').hidden, 'A new player sees a wall of zero statistics');
+    assert($('earned-discoveries').hidden && !$('remaining-discoveries').open);
+    assert.equal($('next-discovery-name').textContent, 'First Fish');
+    assert.equal($('next-discovery-description').textContent, 'Buy your first fish.');
     assert.equal($('tray-content').querySelectorAll('.session-stats > div').length, 6);
     assert.equal($('tray-content').querySelectorAll('[data-achievement]').length, 20);
+    for (const card of $('remaining-discovery-grid').children) {
+        assert(card.querySelector('.achievement-top').contains(card.querySelector('h3')),
+            'A discovery title takes up a separate header row');
+        assert(card.querySelector('.achievement-bonus').textContent.endsWith(' pts'));
+        assert(card.querySelector('time').hidden && !card.querySelector('small'),
+            'An unearned discovery repeats the collection status');
+    }
     assert.equal(evaluate('ZQApp.game'), null, 'Opening progress started a game');
     assert.equal(w.localStorage.getItem(evaluate('ZQ.STORAGE_KEY')), initialSave, 'Opening progress changed the save');
     key('keydown', 'Escape');
@@ -208,8 +224,40 @@ try {
     assert.equal(w.document.activeElement, $('progress-button'), 'Closing progress lost its trigger focus');
     $('journal-button').click();
     assert.equal($('tray-content').querySelector('[data-tab="guide"]').getAttribute('aria-pressed'), 'true');
+    assert.equal($('tray-content').querySelector('[data-tab="guide"]').textContent, 'How to play');
+    const guideSections = [...$('tray-content').querySelectorAll('.guide-section')];
+    assert.deepEqual(guideSections.map(section => section.id),
+        ['guide-care', 'guide-defenses', 'guide-breeding', 'guide-scoring', 'guide-prizes', 'guide-controls', 'guide-saving', 'guide-keyboard']);
+    assert(guideSections.every(section => !section.open && section.firstElementChild.tagName === 'SUMMARY'),
+        'The guide does not start with collapsed, native disclosures');
+    const guideWordCount = node => node.textContent.trim().split(/\s+/).length;
+    assert(guideWordCount($('tray-content').querySelector('.guide-intro')) <= 55,
+        'The How to play introduction became another long reference');
+    assert(guideWordCount($('tray-content')) <= 500, 'The touch-first guide is no longer concise');
+    for (const section of guideSections) {
+        assert(guideWordCount(section) <= (section.id === 'guide-keyboard' ? 90 : 65),
+            `${section.id} has grown beyond a short, scannable section`);
+        if (section.id !== 'guide-keyboard') {
+            assert(!/\b(?:Escape|Enter|[Kk]eyboard)\b|\b(?:[Pp]ress|[Hh]old) [A-Z]\b/.test(section.textContent),
+                `${section.id} mixes keyboard shortcuts into touch instructions`);
+        }
+    }
+    assert.equal($('guide-keyboard').nextElementSibling, null, 'Keyboard shortcuts are not in their own final section');
+    assert($('guide-context').hidden, 'Home guidance adds an unnecessary animation-status note');
+    assert($('guide-care').textContent.includes('Tap Feed, then tap the water'));
+    assert($('guide-care').textContent.includes('You still defend against visitors'));
+    assert.equal($('guide-defenses').querySelectorAll('li').length, 3);
+    assert($('guide-defenses').textContent.includes('hold it while it coils'));
+    assert(guideWordCount($('guide-saving')) <= 45, 'Saving guidance includes more than the essentials');
+    assert($('guide-saving').textContent.includes('Resume last session'));
+    assert($('guide-saving').textContent.includes("Nothing changes while you're away"));
+    assert($('guide-saving').textContent.includes('Starting a new aquarium replaces the saved one'));
+    const sharedScoring = $('guide-scoring').querySelector('.scoring-guide').innerHTML;
+    assert(sharedScoring.includes(evaluate("`${ZQ.CONFIG.defenseRewardMin}\u2013${ZQ.CONFIG.defenseRewardMax}`")));
+    assert(sharedScoring.includes('without the multiplier'));
+    assert(sharedScoring.includes('fade without interrupting play'));
     key('keydown', 'Escape');
-    console.log('PASS Persistent home rails retain branding and stats; Details opens lifetime progress without starting or saving');
+    console.log('PASS Home Progress welcomes a new player without starting, saving, or displaying zero-filled records');
     for (const button of w.document.querySelectorAll('.theme-option')) {
         const previewBeforeHover = $('scene-name').textContent;
         button.dispatchEvent(new w.MouseEvent('mouseover', { bubbles: true }));
@@ -249,6 +297,107 @@ try {
     assert.equal($('sound-button').getAttribute('aria-expanded'), 'false');
     assert.equal(evaluate('ZQApp.game'), null);
     console.log('PASS Welcome sound uses the shared light-dismiss volume flyout without starting a tank or discarding mute volume');
+    $('sound-button').click(); $('volume-mute').click(); key('keydown', 'Escape');
+    assert(evaluate('ZQApp.settings.sound'));
+    pump(3);
+    const homeRenderer = evaluate('ZQApp.renderer');
+    const homeProfile = evaluate('JSON.stringify(ZQApp.profile)');
+    const retainedAquarium = JSON.stringify(stored().session);
+    for (const id of ['journal-button', 'settings-button', 'progress-button']) {
+        const scene = homeRenderer.renderedState, elapsed = scene.elapsed, visual = homeRenderer.renderTime;
+        const draws = homeRenderer.renderCount;
+        const audioBefore = evaluate('audioCalls.length');
+        $(id).focus(); $(id).click();
+        pump(20);
+        assert(frame, `${id} stopped the live preview loop`);
+        assert(homeRenderer.renderCount > draws, `${id} stopped drawing the preview`);
+        assert(scene.elapsed > elapsed, `${id} stopped simulating the preview`);
+        assert(homeRenderer.renderTime > visual, `${id} froze the animated scene`);
+        assert.equal(evaluate('audioCalls.length'), audioBefore, `${id} interrupted the soundtrack`);
+        assert.equal(evaluate('JSON.stringify(ZQApp.profile)'), homeProfile, 'Reading changed lifetime progress');
+        assert.equal(JSON.stringify(stored().session), retainedAquarium, 'Reading changed the retained aquarium');
+        const beforeResize = homeRenderer.renderCount;
+        resizeObservers.get(viewport)();
+        pump(3);
+        assert(homeRenderer.renderCount > beforeResize && frame, 'Resizing a home panel stopped the live preview');
+        if (id === 'settings-button') {
+            const quality = evaluate('ZQApp.settings.quality'), motion = evaluate('ZQApp.settings.motion');
+            for (const [setting, value] of [['quality', 'battery'], ['motion', 'reduced'], ['quality', quality], ['motion', motion]]) {
+                const before = homeRenderer.renderCount, beforeTime = scene.elapsed;
+                $(`setting-${setting}`).value = value;
+                $(`setting-${setting}`).dispatchEvent(new w.Event('change', { bubbles: true }));
+                pump(3);
+                assert(homeRenderer.renderCount > before && frame, `Changing ${setting} froze the preview`);
+                assert(scene.elapsed > beforeTime, `Changing ${setting} stopped the demo`);
+            }
+            assert.equal(evaluate('audioCalls.length'), audioBefore, 'Display changes interrupted the soundtrack');
+        }
+        if (id === 'journal-button') {
+            $('guide-defenses').open = true;
+            const disclosureAudio = evaluate('audioCalls.length');
+            pump(5);
+            assert($('guide-defenses').open, 'The guide collapsed while reading');
+            assert(frame, 'Expanding guidance stopped the preview');
+            assert.equal(evaluate('audioCalls.length'), disclosureAudio);
+            $('tray-content').querySelector('[data-tab="achievements"]').click();
+            pump(3);
+            assert(frame, 'Switching to discoveries stopped the home preview');
+            $('tray-content').querySelector('[data-tab="guide"]').click();
+            assert.equal($('guide-scoring').querySelector('.scoring-guide').innerHTML, sharedScoring);
+        }
+        key('keydown', 'Escape');
+        assert.equal(w.document.activeElement, $(id), 'Dismissal lost the home-panel trigger');
+        const beforeDismiss = scene.elapsed;
+        pump(2);
+        assert(scene.elapsed > beforeDismiss && frame, 'Dismissing a home panel stopped the preview');
+        assert.equal(evaluate('audioCalls.length'), audioBefore, 'Dismissal restarted the soundtrack');
+    }
+    const aboutTime = homeRenderer.renderedState.elapsed, aboutDraws = homeRenderer.renderCount;
+    $('about-button').focus(); $('about-button').click();
+    pump(20);
+    assert.equal(frame, null, 'About stopped suspending the preview');
+    assert.equal(homeRenderer.renderCount, aboutDraws);
+    assert.equal(homeRenderer.renderedState.elapsed, aboutTime);
+    assert.equal(evaluate('audioCalls.at(-1)'), 'suspend', 'About stopped suspending audio');
+    $('panel').dispatchEvent(new w.Event('cancel', { cancelable: true }));
+    pump(3);
+    assert(homeRenderer.renderedState.elapsed > aboutTime && frame, 'Closing About did not restore the live view');
+    assert.equal(evaluate('audioCalls.at(-1)'), 'enable', 'Closing About did not restore the soundtrack');
+    $('journal-button').focus(); $('journal-button').click();
+    const hiddenDescriptor = Object.getOwnPropertyDescriptor(w.document, 'hidden');
+    const backgroundTime = homeRenderer.renderedState.elapsed;
+    try {
+        Object.defineProperty(w.document, 'hidden', { value: true, configurable: true });
+        w.document.dispatchEvent(new w.Event('visibilitychange'));
+        assert.equal(evaluate('audioCalls.at(-1)'), 'suspend', 'Backgrounding failed to suspend home audio');
+        assert.equal(frame, null);
+        pump(20);
+        assert.equal(homeRenderer.renderedState.elapsed, backgroundTime, 'The hidden preview kept simulating');
+        Object.defineProperty(w.document, 'hidden', { value: false, configurable: true });
+        w.document.dispatchEvent(new w.Event('visibilitychange'));
+        pump(1);
+        assert.equal(homeRenderer.renderedState.elapsed, backgroundTime, 'The preview caught up on time spent away');
+        pump(3);
+        assert(frame, 'Foregrounding left the preview frozen behind the guide');
+        assert(homeRenderer.renderedState.elapsed > backgroundTime);
+        assert.equal(evaluate('audioCalls.at(-1)'), 'enable', 'Foregrounding left the chosen soundtrack suspended');
+    } finally {
+        if (hiddenDescriptor) Object.defineProperty(w.document, 'hidden', hiddenDescriptor);
+        else delete w.document.hidden;
+    }
+    $('sound-button').focus(); $('sound-button').click();
+    pump(3);
+    assert(frame, 'The home sound flyout stopped the live preview');
+    $('volume-mute').click(); key('keydown', 'Escape');
+    assert(!evaluate('ZQApp.settings.sound'));
+    assert.equal(w.document.activeElement, $('sound-button'));
+    $('progress-button').click();
+    const outsideReader = new w.MouseEvent('pointerdown', { bubbles: true, cancelable: true });
+    w.document.body.dispatchEvent(outsideReader);
+    assert($('tray').hidden && outsideReader.defaultPrevented, 'The home reader did not consume its outside-dismiss tap');
+    pump(3);
+    assert(frame, 'Outside dismissal stopped the preview');
+    console.log('PASS Home panels keep the preview and soundtrack live, About still suspends both, and background return resumes without catch-up');
     $('begin-button').click(); pump(2);
     const initialGame = JSON.parse(evaluate('JSON.stringify(ZQApp.game.snapshot())'));
     assert.equal(initialGame.themeId, initialTheme.dataset.theme);
@@ -263,10 +412,25 @@ try {
     const savedAquarium = w.localStorage.getItem(evaluate('ZQ.STORAGE_KEY'));
     assert.equal(stored().session.elapsed, initialGame.elapsed);
     assert.equal(stored().session.paused, true);
+    $('progress-button').focus(); $('progress-button').click();
+    assert($('progress-welcome').hidden && !$('progress-records').hidden,
+        'An unfinished, resumable aquarium was mistaken for an empty profile');
+    assert.equal($('lifetime-sessions').textContent, '0');
+    assert.equal($('lifetime-population').textContent, '2');
+    assert.equal($('lifetime-milestone').textContent, 'Not yet');
+    assert(!$('completed-sessions').open, 'Completed-session metrics crowd out ongoing progress');
+    assert.equal(w.localStorage.getItem(evaluate('ZQ.STORAGE_KEY')), savedAquarium);
+    key('keydown', 'Escape');
     $('about-button').click();
     assert.equal(evaluate('ZQApp.game'), null);
     assert.equal(w.localStorage.getItem(evaluate('ZQ.STORAGE_KEY')), savedAquarium, 'About replaced the resumable aquarium');
     $('panel').dispatchEvent(new w.Event('cancel', { cancelable: true }));
+    for (const id of ['journal-button', 'settings-button', 'progress-button']) {
+        $(id).click(); pump(3);
+        assert.equal(w.localStorage.getItem(evaluate('ZQ.STORAGE_KEY')), savedAquarium,
+            `${id} modified an existing retained aquarium or lifetime profile`);
+        key('keydown', 'Escape');
+    }
     for (const button of w.document.querySelectorAll('.theme-option')) {
         button.click();
         assert.equal($('begin-label').textContent, 'Start');
@@ -604,10 +768,23 @@ try {
 
     key('keydown', 'Escape');
     const tapsBeforeDismiss = evaluate('ZQApp.game.state.stats.taps');
-    $('score-button').click();
+    $('score-button').focus(); $('score-button').click();
     assert.equal($('tray').dataset.kind, 'score');
+    assert.equal($('tray-content').querySelector('.scoring-guide').innerHTML, sharedScoring,
+        'Guide and dashboard scoring explanations drifted apart');
+    w.document.querySelector('[data-menu-action="progress"]').click();
+    assert.equal($('tray').dataset.kind, 'progress');
+    assert.equal($('tray').dataset.anchor, 'health', 'Lifetime progress moved away from its in-game entry point');
+    assert.equal($('lifetime-score').textContent, evaluate('Math.floor(ZQApp.profile.highScore).toLocaleString()'));
+    assert.equal($('lifetime-population').textContent, evaluate('Math.floor(ZQApp.profile.stats.peak).toLocaleString()'));
+    assert.equal($('lifetime-milestone').textContent,
+        evaluate("ZQ.MILESTONES.find(m => m.id === ZQApp.profile.bestMilestone)?.name || 'Not yet'"));
+    const progressTime = evaluate('ZQApp.game.state.elapsed');
+    pump(15);
+    assert(evaluate('ZQApp.game.state.elapsed') > progressTime && frame, 'Lifetime progress interrupted the aquarium');
     pointer('pointerdown', 1000, 700); pointer('pointerup', 1000, 700);
-    assert($('tray').hidden, 'Score details did not light-dismiss');
+    assert($('tray').hidden, 'Lifetime progress did not light-dismiss');
+    assert.equal(w.document.activeElement, $('score-button'), 'Progress lost the aquarium status trigger');
     assert.equal(evaluate('ZQApp.game.state.stats.taps'), tapsBeforeDismiss);
 
     returnHome();
@@ -616,6 +793,37 @@ try {
     $('menu-button').click();
     w.document.querySelector('[data-menu-action="settings"]').click();
     assert(!$('end-session-button') && !$('save-home-button'), 'Settings still contains redundant or destructive session exits');
+    const settingsTime = evaluate('ZQApp.game.state.elapsed'), settingsAudio = evaluate('audioCalls.length');
+    pump(5);
+    assert(evaluate('ZQApp.game.state.elapsed') > settingsTime, 'Settings paused the running aquarium');
+    assert.equal(evaluate('audioCalls.length'), settingsAudio, 'In-game Settings interrupted audio');
+    key('keydown', 'Escape');
+    $('menu-button').click();
+    w.document.querySelector('[data-menu-action="journal"]').click();
+    assert($('tray-content').querySelector('.guide-context').textContent.includes('keeps running'));
+    const gameGuideTime = evaluate('ZQApp.game.state.elapsed'), gameGuideAudio = evaluate('audioCalls.length');
+    const defenseSummary = $('guide-defenses').querySelector('summary');
+    defenseSummary.focus();
+    for (const activation of [' ', 'Enter']) {
+        const event = new w.KeyboardEvent('keydown', { key: activation, bubbles: true, cancelable: true });
+        defenseSummary.dispatchEvent(event);
+        assert(!event.defaultPrevented, 'The guide blocked native keyboard disclosure activation');
+        assert(!evaluate('ZQApp.game.state.paused'), 'Opening a guide disclosure paused the aquarium');
+    }
+    $('guide-defenses').open = true;
+    pump(20);
+    assert(evaluate('ZQApp.game.state.elapsed') > gameGuideTime, 'The in-game guide stopped simulation');
+    assert.equal(evaluate('audioCalls.length'), gameGuideAudio, 'The in-game guide interrupted audio');
+    assert($('guide-defenses').open, 'Live guide refresh collapsed the current reference');
+    $('viewport').focus(); key('keydown', ' ');
+    assert(evaluate('ZQApp.game.state.paused'));
+    assert($('guide-context').textContent.includes('is paused'), 'The guide claims a paused aquarium is running');
+    const pausedGuideTime = evaluate('ZQApp.game.state.elapsed');
+    pump(5);
+    assert.equal(evaluate('ZQApp.game.state.elapsed'), pausedGuideTime);
+    key('keydown', ' ');
+    assert($('guide-context').textContent.includes('keeps running'));
+    assert($('guide-defenses').open, 'Pause/resume lost the current guide section');
     key('keydown', 'Escape');
     $('menu-button').click();
     assert.deepEqual([...w.document.querySelectorAll('#tray [data-menu-action]')].map(b => b.dataset.menuAction),
@@ -895,6 +1103,172 @@ try {
     assert.equal($('toast').dataset.kind, 'loss', 'Birth announcements displaced urgent loss information');
     assert.equal($('toast').textContent, 'A resident was lost');
     console.log('PASS Real births announce the baby and bonus without pausing; routine rewards do not replace them and urgent loss still takes priority');
+
+    {
+        const schedule = w.setTimeout, cancel = w.clearTimeout;
+        const notices = new Map();
+        let timerId = -1;
+        w.setTimeout = function (callback, delay, ...args) {
+            if (delay !== 4100 && delay !== 400) return schedule.call(this, callback, delay, ...args);
+            const id = timerId--;
+            notices.set(id, () => callback(...args));
+            return id;
+        };
+        w.clearTimeout = function (id) {
+            if (!notices.delete(id)) cancel.call(this, id);
+        };
+        const tickNotice = () => {
+            const next = notices.entries().next().value;
+            assert(next, 'The visible notice has no expiration timer');
+            notices.delete(next[0]);
+            next[1]();
+        };
+        const finishNotice = () => { tickNotice(); tickNotice(); };
+        const normalUpdate = evaluate('ZQApp.game.update');
+        try {
+            evaluate("ZQApp.game.reject('Preparing discovery acknowledgements')");
+            pump(1);
+            for (let i = 0; notices.size && i < 100; i++) tickNotice();
+            assert.equal(notices.size, 0, 'Earlier acknowledgements could not finish');
+            evaluate(`{
+                const g = ZQApp.game;
+                g.update = () => {};
+                g.profile.achievements = {};
+                g.state.newAchievements = [];
+                g.state.multiplier = 2;
+                g.drainEvents();
+            }`);
+            $('score-button').click();
+            w.document.querySelector('[data-menu-action="progress"]').click();
+            $('remaining-discoveries').open = true;
+            $('remaining-discovery-count').focus();
+            const discoveries = JSON.parse(evaluate('JSON.stringify(ZQ.ACHIEVEMENTS)'));
+            evaluate('for (const discovery of ZQ.ACHIEVEMENTS.slice(0, 2)) ZQApp.game.unlock(discovery.id)');
+            pump(15);
+            assert($('remaining-discoveries').open, 'An unlock collapsed the collection being read');
+            assert.equal(w.document.activeElement, $('remaining-discovery-count'), 'An unlock replaced the focused disclosure');
+            assert.equal($('next-discovery-name').textContent, 'Full Spectrum', 'Try next still suggests a collected discovery');
+            assert.deepEqual([...$('discovered-grid').children].map(card => card.dataset.achievement), ['schooling', 'first-fish']);
+            for (const card of $('discovered-grid').children) {
+                const date = evaluate(`ZQApp.profile.achievements[${JSON.stringify(card.dataset.achievement)}]`);
+                const timestamp = card.querySelector('time');
+                assert(card.querySelector('.achievement-top').contains(timestamp) && !timestamp.hidden);
+                assert.equal(timestamp.dateTime, date);
+                assert.equal(timestamp.getAttribute('aria-label'), `Discovered ${date}`);
+                assert(card.querySelector('.achievement-bonus').hidden,
+                    'A collected discovery still advertises an unearned bonus');
+            }
+            evaluate('for (const discovery of ZQ.ACHIEVEMENTS.slice(2)) ZQApp.game.unlock(discovery.id)');
+            pump(15);
+            assert.equal($('discovered-grid').children.length, discoveries.length);
+            assert.deepEqual([...$('discovered-grid').children].map(card => card.dataset.achievement),
+                discoveries.map(discovery => discovery.id).reverse(), 'Newest discoveries are not first');
+            assert($('remaining-discoveries').hidden && $('next-discovery').hidden,
+                'The completed collection still suggests an earned discovery');
+            assert.equal(w.document.activeElement, $('discovered-count'), 'Completing the collection lost keyboard focus');
+            assert.equal($('toast').textContent, 'New discovery: First Fish +50 pts');
+            evaluate("ZQApp.game.emit('loss', 'A resident needs attention')");
+            pump(1);
+            assert.equal($('toast').dataset.kind, 'loss', 'Discovery messages displaced urgent information');
+            finishNotice();
+            assert.equal($('toast').textContent, 'New discovery: First Fish +50 pts',
+                'An interruption discarded the current discovery');
+            const hidden = Object.getOwnPropertyDescriptor(w.document, 'hidden');
+            try {
+                Object.defineProperty(w.document, 'hidden', { value: true, configurable: true });
+                w.document.dispatchEvent(new w.Event('visibilitychange'));
+                assert($('toast').hidden && notices.size === 0, 'A discovery expired while the tab was hidden');
+                Object.defineProperty(w.document, 'hidden', { value: false, configurable: true });
+                w.document.dispatchEvent(new w.Event('visibilitychange'));
+                assert.equal($('toast').textContent, 'New discovery: First Fish +50 pts');
+            } finally {
+                if (hidden) Object.defineProperty(w.document, 'hidden', hidden);
+                else delete w.document.hidden;
+            }
+            $('unpause-button').click();
+            $('about-button').click();
+            assert($('panel').open && $('toast').hidden && notices.size === 0,
+                'A discovery was consumed behind a modal');
+            $('panel').dispatchEvent(new w.Event('cancel', { cancelable: true }));
+            for (const discovery of discoveries) {
+                assert(!$('toast').hidden && $('toast').dataset.kind === 'achievement');
+                assert.equal($('toast').textContent, `New discovery: ${discovery.name} +${discovery.bonus * 2} pts`,
+                    `${discovery.id} did not receive its own acknowledgement`);
+                assert(!evaluate('ZQApp.game.state.paused') && !$('panel').open);
+                finishNotice();
+            }
+            assert($('toast').hidden && notices.size === 0, 'The acknowledgement queue did not drain');
+            assert.equal(Object.keys(stored().profile.achievements).length, discoveries.length);
+            evaluate('for (const discovery of ZQ.ACHIEVEMENTS) ZQApp.game.unlock(discovery.id)');
+            pump(2);
+            assert($('toast').hidden, 'An already-collected discovery was announced again');
+            $('menu-button').click();
+            w.document.querySelector('[data-menu-action="journal"]').click();
+            w.document.querySelector('[data-tab="achievements"]').click();
+            assert.deepEqual([...$('discovered-grid').children].map(card => card.dataset.achievement),
+                discoveries.map(discovery => discovery.id).reverse(), 'The guide uses a different discovery collection');
+            assert($('remaining-discoveries').hidden && $('next-discovery').hidden);
+            key('keydown', 'Escape');
+            evaluate(`{
+                const g = ZQApp.game, ids = ['first-fish', 'schooling'];
+                g.state.newAchievements = g.state.newAchievements.filter(id => !ids.includes(id));
+                for (const id of ids) { delete g.profile.achievements[id]; g.unlock(id); }
+            }`);
+            pump(1);
+            assert.equal($('toast').textContent, 'New discovery: First Fish +50 pts');
+            const write = w.Storage.prototype.setItem, exitingGame = evaluate('ZQApp.game');
+            try {
+                w.Storage.prototype.setItem = function () { throw new w.DOMException('Storage full', 'QuotaExceededError'); };
+                returnHome();
+                assert.equal(evaluate('ZQApp.game'), exitingGame, 'A failed save exited the aquarium');
+                assert.equal($('toast').dataset.kind, 'warning');
+                assert($('toast').textContent.includes('was not saved'));
+            } finally {
+                w.Storage.prototype.setItem = write;
+            }
+            finishNotice();
+            assert.equal($('toast').textContent, 'New discovery: First Fish +50 pts',
+                'A failed Save & Return discarded pending acknowledgements');
+            tickNotice();
+            assert($('toast').classList.contains('fading'));
+            $('pause-home-button').click();
+            assert.equal(evaluate('ZQApp.game'), null);
+            assert($('toast').hidden && notices.size === 0 && !$('toast').classList.contains('fading'),
+                'Save & Return left an active discovery or its timer on Start');
+            assert.equal(Object.keys(stored().profile.achievements).length, discoveries.length,
+                'Clearing notices removed earned discoveries');
+            $('progress-button').click(); pump(5);
+            assert($('toast').hidden && notices.size === 0, 'A Start refresh replayed queued discoveries');
+            key('keydown', 'Escape');
+            $('resume-button').click(); pump(2);
+            assert($('toast').hidden && notices.size === 0, 'Resume replayed the discarded notice queue');
+            evaluate('ZQApp.game').update = normalUpdate;
+            returnHome(); $('begin-button').click();
+            evaluate(`{
+                delete ZQApp.profile.achievements.pacifist;
+                const g = ZQApp.game;
+                g.state.elapsed = 120; g.state.stats.lost = 0;
+                g.update = () => g.finish();
+            }`);
+            pump(2);
+            assert($('panel').open && $('panel-content').textContent.includes('New discoveries'));
+            assert($('panel-content').textContent.includes('Pacifist'), 'The completion-only discovery was not acknowledged');
+            $('panel').dispatchEvent(new w.Event('cancel', { cancelable: true }));
+            assert($('toast').hidden, 'The summary acknowledgement replayed after dismissal');
+            $('begin-button').click();
+            evaluate('delete ZQApp.profile.achievements.pacifist; ZQApp.game.state.elapsed = 120; ZQApp.game.state.stats.lost = 0');
+            returnHome(); $('begin-button').click();
+            assert.equal($('toast').textContent, 'New discovery: Pacifist \u00b7 Previous aquarium',
+                'Replacing a saved aquarium discarded its completion discovery or credited the new aquarium');
+            assert.equal(evaluate('ZQApp.game.state.score'), evaluate('ZQ.CONFIG.startingScore'));
+            finishNotice();
+            pump(3);
+        } finally {
+            if (evaluate('ZQApp.game')) evaluate('ZQApp.game').update = normalUpdate;
+            w.setTimeout = schedule; w.clearTimeout = cancel;
+        }
+    }
+    console.log('PASS All twenty discoveries receive acknowledgements; failed exits preserve them and successful exits clear notices without losing records');
 
     $('menu-button').click();
     w.document.querySelector('[data-menu-action="settings"]').click();

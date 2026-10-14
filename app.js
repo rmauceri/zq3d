@@ -22,6 +22,7 @@ const ZQApp = (() => {
     let failedSessionSave = false;
     let raf = 0, lastTime = 0, renderTime = 0, visualTime = 0, lastDraw = 0;
     let autosaveTime = 0, hudTime = 0, toastTimer = 0;
+    let discoveryQueue = [], activeDiscovery = null;
     let checkpointTask = 0, checkpointIdle = false, backgrounded = false;
     let installPrompt = null, registration = null, offlineReady = false, appInstalled = false, wakeLock = null;
     let wakeGeneration = 0, pointers = new Map(), gesture = null, pinchDistance = 0;
@@ -123,6 +124,7 @@ const ZQApp = (() => {
         refresh();
     }
     function toast(message, kind = 'info', amount = null) {
+        deferDiscovery();
         clearTimeout(toastTimer);
         const value = amount !== null ? ` ${amount > 0 ? '+' : ''}${Number(amount.toFixed(1))} pts` : '';
         $('toast').textContent = message + value;
@@ -132,8 +134,32 @@ const ZQApp = (() => {
         positionOverlays();
         toastTimer = setTimeout(() => {
             $('toast').classList.add('fading');
-            toastTimer = setTimeout(() => { $('toast').hidden = true; positionOverlays(); }, PARAMS.toastFade);
+            toastTimer = setTimeout(() => {
+                activeDiscovery = null;
+                $('toast').hidden = true;
+                positionOverlays();
+                nextDiscovery();
+            }, PARAMS.toastFade);
         }, PARAMS.toastDuration - PARAMS.toastFade);
+    }
+    function queueDiscoveries(events) {
+        discoveryQueue.push(...events.filter(event => event.type === 'achievement'));
+        if (discoveryQueue.length) dismissInfoToast();
+    }
+    function deferDiscovery() {
+        if (!activeDiscovery) return;
+        discoveryQueue.unshift(activeDiscovery);
+        activeDiscovery = null;
+        clearTimeout(toastTimer);
+        $('toast').hidden = true;
+        positionOverlays();
+    }
+    function nextDiscovery() {
+        if (!game || game.state.ended || !discoveryQueue.length || document.hidden || $('panel').open || !$('toast').hidden) return;
+        const discovery = discoveryQueue.shift();
+        toast(discovery.message + (discovery.previousAquarium ? ' \u00b7 Previous aquarium' : ''),
+            'achievement', discovery.previousAquarium ? null : discovery.amount);
+        activeDiscovery = discovery;
     }
     function positionOverlays() {
         if (!$('save-warning').hidden) {
@@ -328,8 +354,11 @@ const ZQApp = (() => {
         if (savedSession) {
             const previous = new ZQ.Game(savedSession.themeId, profile, { snapshot: savedSession });
             previous.finish();
+            queueDiscoveries(previous.drainEvents());
             savedSession = null;
         }
+        deferDiscovery();
+        for (const discovery of discoveryQueue) discovery.previousAquarium = true;
         begin(false);
     }
     function goHome() {
@@ -345,6 +374,12 @@ const ZQApp = (() => {
             savedSession = null;
             save();
         }
+        discoveryQueue = [];
+        activeDiscovery = null;
+        clearTimeout(toastTimer);
+        toastTimer = 0;
+        $('toast').hidden = true;
+        $('toast').classList.remove('fading');
         game = null;
         applyColorScheme();
         closePanel();
@@ -353,7 +388,6 @@ const ZQApp = (() => {
         document.body.classList.remove('has-care-alert');
         $('exit-immersion').hidden = true;
         $('game-ui').hidden = true;
-        clearTimeout(toastTimer); $('toast').hidden = true;
         renderer.resize();
         preview(selectedTheme);
         updateWelcome();
@@ -480,6 +514,7 @@ const ZQApp = (() => {
     function consumeEvents() {
         if (!game) return;
         const events = game.drainEvents();
+        queueDiscoveries(events);
         let mostImportant = null;
         const priority = { milestone: 12, end: 12, defended: 11, prize: 11, challenge: 10, achievement: 9, attack: 8, loss: 7, warning: 6, visitor: 5, birth: 4, bonus: 3 };
         for (const event of events) {
@@ -499,8 +534,9 @@ const ZQApp = (() => {
             if (!event.creature && (event.rejected || event.type === 'milestone' || event.type === 'birth' || event.type === 'defended' || event.type === 'loss' || event.type === 'attack' && !game.state.creature) &&
                 (!mostImportant || (priority[event.type] || 1) >= (priority[mostImportant.type] || 1))) mostImportant = event;
         }
-        if (mostImportant) toast(mostImportant.type === 'milestone' ? `${mostImportant.message} achieved!` : mostImportant.message,
+        if (mostImportant && !game.state.ended) toast(mostImportant.message,
             mostImportant.type, mostImportant.amount ?? null);
+        nextDiscovery();
         if (events.some(e => e.type === 'defended')) scheduleCheckpoint();
         if (events.some(e => ['achievement', 'milestone', 'end', 'loss', 'birth', 'prize', 'defended', 'dispute', 'separated'].includes(e.type))) save();
     }
@@ -564,6 +600,9 @@ const ZQApp = (() => {
     function refresh() {
         updateSoundControls();
         updateSettingsStatus();
+        nextDiscovery();
+        if (panelKind === 'journal' && !$('tray').hidden) updateJournal();
+        if (panelKind === 'progress' && !$('tray').hidden) updateProgress();
         if (!game) { updateWelcome(); positionOverlays(); return; }
         const s = game.state;
         const actionable = !s.paused && !s.ended && !storageConflict;
@@ -611,7 +650,6 @@ const ZQApp = (() => {
         if (panelKind === 'shop' && $('catalog').open) updateShopButtons();
         if (panelKind === 'residents' && !$('tray').hidden) updateResidents();
         if (panelKind === 'prizes' && !$('tray').hidden) updatePrizes();
-        if (panelKind === 'journal' && !$('tray').hidden) updateJournal();
         if (panelKind === 'score' && !$('tray').hidden) updateScore();
         if (panelKind === 'camera' && !$('tray').hidden) updateCamera();
         if (panelKind === 'activity' && !$('tray').hidden) updateActivity();
@@ -637,7 +675,9 @@ const ZQApp = (() => {
                 $('tray').dataset.anchor = anchor || 'menu';
             } else if (anchor) {
                 $('tray').dataset.anchor = anchor;
-                trayTrigger = anchor === 'health' ? $('score-button') : $('menu-button');
+                const triggers = { health: 'score-button', menu: 'menu-button', sound: 'sound-button',
+                    volume: 'volume-button', progress: 'progress-button' };
+                trayTrigger = $(triggers[anchor]);
             }
             $('tray-title').textContent = title;
             $('tray-eyebrow').textContent = eyebrow;
@@ -650,6 +690,7 @@ const ZQApp = (() => {
             $('tray').focus({ preventScroll: true });
             requestFrame();
         } else {
+            deferDiscovery();
             $('tray').hidden = true;
             $('tray-content').replaceChildren();
             document.body.classList.remove('tray-open');
@@ -751,7 +792,7 @@ const ZQApp = (() => {
     function menuAction(action) {
         const actions = {
             residents: showResidents, score: showScore, prizes: showPrizes, journal: () => showJournal(),
-            settings: showSettings, activity: showActivity, camera: showCamera,
+            settings: showSettings, activity: showActivity, camera: showCamera, progress: showProgress,
             immerse: () => immerse(true), home: goHome,
             orbit: () => renderer.orbit(Math.PI / 8, 0),
             view: () => {
@@ -921,21 +962,102 @@ const ZQApp = (() => {
         }
     }
     function discoveryContent() {
-        return `<p>Twenty little reasons to look closer. Each discovery awards its bonus once per saved profile, multiplied by your current healthy streak.</p>
-            <div class="achievement-grid">${ZQ.ACHIEVEMENTS.map(a => `<article data-achievement="${a.id}" class="achievement ${profile.achievements[a.id] ? 'unlocked' : ''}">
-            <div class="achievement-top">${icon('award')}<span>+${a.bonus} pts</span></div><h3>${a.name}</h3><p>${a.description}</p><small>${profile.achievements[a.id] ? `Discovered ${profile.achievements[a.id]}` : 'Still to discover'}</small></article>`).join('')}</div>`;
+        return `<section class="discovery-collection">
+            <section id="earned-discoveries" hidden><h3 id="discovered-count" tabindex="-1"></h3>
+                <div class="achievement-grid" id="discovered-grid"></div></section>
+            <section class="discovery-next" id="next-discovery" hidden><h3>Try next</h3>
+                <p><strong id="next-discovery-name"></strong> <span id="next-discovery-description"></span></p></section>
+            <details class="settings-section" id="remaining-discoveries">
+                <summary id="remaining-discovery-count">Still to discover</summary>
+                <div class="achievement-grid" id="remaining-discovery-grid">${ZQ.ACHIEVEMENTS.map(a =>
+                    `<article data-achievement="${a.id}" class="achievement">
+                    <div class="achievement-top">${icon('award')}<h3>${a.name}</h3>
+                        <span class="achievement-bonus">+${a.bonus} pts</span><time hidden></time></div>
+                    <p>${a.description}</p></article>`).join('')}</div>
+            </details>
+            <p class="discovery-note">Each discovery gives a one-time bonus to the aquarium where you earn it. A healthy streak can boost that bonus.</p>
+        </section>`;
+    }
+    function updateDiscoveries() {
+        const collection = panelContent().querySelector('.discovery-collection');
+        if (!collection) return;
+        const revision = JSON.stringify(profile.achievements);
+        if (collection.dataset.revision === revision) return;
+        collection.dataset.revision = revision;
+        const earned = Object.keys(profile.achievements).reverse()
+            .sort((a, b) => profile.achievements[b].localeCompare(profile.achievements[a]));
+        const remaining = ZQ.ACHIEVEMENTS.filter(a => !profile.achievements[a.id]).map(a => a.id);
+        for (const [host, ids] of [[$('discovered-grid'), earned], [$('remaining-discovery-grid'), remaining]]) {
+            for (const id of ids) {
+                const card = collection.querySelector(`[data-achievement="${id}"]`);
+                const date = profile.achievements[id];
+                card.classList.toggle('unlocked', Boolean(date));
+                card.querySelector('.achievement-bonus').hidden = Boolean(date);
+                const discovered = card.querySelector('time');
+                discovered.hidden = !date;
+                if (date) {
+                    discovered.dateTime = date;
+                    discovered.textContent = date;
+                    discovered.setAttribute('aria-label', `Discovered ${date}`);
+                }
+                host.append(card);
+            }
+        }
+        $('earned-discoveries').hidden = !earned.length;
+        setText('discovered-count', `${earned.length} / ${ZQ.ACHIEVEMENTS.length} discovered`);
+        if (!remaining.length && $('remaining-discoveries').contains(document.activeElement)) {
+            $('discovered-count').focus({ preventScroll: true });
+        }
+        $('remaining-discoveries').hidden = !remaining.length;
+        setText('remaining-discovery-count', `Still to discover (${remaining.length})`);
+        const nextId = ['first-fish', 'schooling', 'full-spectrum', 'thousandaire', 'baby-boom',
+            'night-owl', 'fish-whisperer', 'streak-master', 'high-roller', 'ten-thousandaire', 'zen-master']
+            .find(id => !profile.achievements[id]);
+        const next = ZQ.ACHIEVEMENTS.find(a => a.id === nextId);
+        $('next-discovery').hidden = !next;
+        if (next) {
+            setText('next-discovery-name', next.name);
+            setText('next-discovery-description', next.description);
+        }
+    }
+    function hasLifetimeProgress() {
+        return Boolean(game || savedSession || profile.sessions || profile.highScore || profile.bestMilestone
+            || profile.themesPlayed.length || Object.keys(profile.achievements).length
+            || Object.values(profile.stats).some(value => value > 0));
     }
     function showProgress() {
         openPanel('progress', 'Your progress.', 'ACROSS YOUR AQUARIUMS',
-            `<div class="session-stats">
-                <div><strong>${number(profile.highScore)}</strong><small>PERSONAL BEST</small></div>
-                <div><strong>${number(profile.sessions)}</strong><small>SESSIONS COMPLETED</small></div>
-                <div><strong>${duration(profile.stats.longest)}</strong><small>LONGEST SESSION</small></div>
-                <div><strong>${profile.themesPlayed.length} / ${Object.keys(ZQ.THEMES).length}</strong><small>WORLDS VISITED</small></div>
-                <div><strong>${number(profile.stats.born)}</strong><small>BABIES BORN</small></div>
-                <div><strong>${Object.keys(profile.achievements).length} / ${ZQ.ACHIEVEMENTS.length}</strong><small>DISCOVERIES</small></div>
+            `<h3 id="progress-welcome" hidden>Your story starts here.</h3>
+            <p>Your discoveries and personal bests grow across all your aquariums on this device. Points and tank prizes belong to each aquarium.</p>
+            <div class="session-stats progress-stats" id="progress-records">
+                <div><strong id="lifetime-score"></strong><small>PERSONAL BEST</small></div>
+                <div><strong id="lifetime-milestone" class="milestone-record"></strong><small>HIGHEST MILESTONE</small></div>
+                <div><strong id="lifetime-population"></strong><small>LARGEST POPULATION</small></div>
+                <div><strong id="lifetime-worlds"></strong><small>WORLDS VISITED</small></div>
+                <div><strong id="lifetime-babies"></strong><small>BABIES BORN</small></div>
+                <div><strong id="lifetime-discoveries"></strong><small>DISCOVERIES</small></div>
             </div>
-            <h3>Your discoveries</h3>${discoveryContent()}`);
+            <details class="settings-section" id="completed-sessions"><summary>More statistics</summary>
+                <dl class="progress-records"><div><dt>Sessions completed</dt><dd id="lifetime-sessions"></dd></div>
+                    <div><dt>Longest completed session</dt><dd id="lifetime-longest"></dd></div></dl>
+                <p>Personal records and discoveries grow while you play, even before a session ends.</p>
+            </details>
+            ${discoveryContent()}`, game ? 'health' : 'progress');
+    }
+    function updateProgress() {
+        const started = hasLifetimeProgress();
+        $('progress-welcome').hidden = started;
+        $('progress-records').hidden = !started;
+        $('completed-sessions').hidden = !started;
+        setText('lifetime-score', number(profile.highScore));
+        setText('lifetime-milestone', ZQ.MILESTONES.find(m => m.id === profile.bestMilestone)?.name || 'Not yet');
+        setText('lifetime-population', number(profile.stats.peak));
+        setText('lifetime-worlds', `${profile.themesPlayed.length} / ${Object.keys(ZQ.THEMES).length}`);
+        setText('lifetime-babies', number(profile.stats.born));
+        setText('lifetime-discoveries', `${Object.keys(profile.achievements).length} / ${ZQ.ACHIEVEMENTS.length}`);
+        setText('lifetime-sessions', number(profile.sessions));
+        setText('lifetime-longest', duration(profile.stats.longest));
+        updateDiscoveries();
     }
     function showAbout() {
         openPanel('about', 'Zenquarium 3D', '',
@@ -946,40 +1068,85 @@ const ZQApp = (() => {
         $('about-tagline').focus({ preventScroll: true });
         $('panel-content').scrollTop = 0;
     }
+    function scoringGuide() {
+        return `<div class="scoring-guide">
+            <p>Healthy adults earn points. Keeping everyone healthy builds a multiplier; care, babies, and discoveries can bring bonuses.</p>
+            <p>Quick defenses earn ${ZQ.CONFIG.defenseRewardMin}\u2013${ZQ.CONFIG.defenseRewardMax} points, without the multiplier. Fish losses, neglect, and repeated glass tapping cost points.</p>
+            <p>Milestones celebrate your progress, then fade without interrupting play.</p>
+        </div>`;
+    }
     function showJournal(tab = journalTab) {
         journalTab = tab;
         const tabs = `<div class="panel-tabs" role="group" aria-label="Field guide sections">
-            <button data-tab="guide" aria-pressed="${tab === 'guide'}">A little guidance</button>
+            <button data-tab="guide" aria-pressed="${tab === 'guide'}">How to play</button>
             <button data-tab="achievements" aria-pressed="${tab === 'achievements'}">Discoveries &middot; ${Object.keys(profile.achievements).length}/20</button></div>`;
         const guide = `
-            <p>Same soul. A new perspective. Zenquarium 3D is a standalone companion to Zenquarium, made for a few quiet minutes or a longer journey.</p>
-            <div class="guide-grid">
-                ${icon('feed')}<div><h3>Tend, don't hurry.</h3><p>Tap Feed once, then click anywhere in the water to place flakes there. Double-tap Feed for a normal surface drop. Each drop costs 5 points; Escape cancels without spending. Clean for 10. Adult fish above 50% health earn 0.5 points per second. Babies grow into their role. Empty aquariums have a five-second rescue window; zero water health ends a session.</p></div>
-                ${icon('award')}<div><h3>A healthy rhythm.</h3><p>Keep every fish above 80% health for \u00d71.5 at 30 seconds, \u00d72 at 90, and \u00d73 at 180. A fish below 50% resets it. The multiplier applies to positive earnings, not costs or penalties. All four species, happy schools, and baby fish bring bonuses.</p></div>
-                ${icon('fish')}<div><h3>Defend their little world.</h3><p>Creatures persist until you fend them off. Help appears near the dock on entry and each attack warning, then fades. Press on a jellyfish, squid, or octopus, drag outward, then release; three swipes send it away. Octopus and squid ink, dropped jellyfish spines, and an eel's electric field kill any fish crossing them. Crabs grab fish with their claws and can jump off the floor. A lost fish rolls upside down, floats up, then dissolves. A message confirms successful defense.</p></div>
-                ${icon('chest')}<div><h3>Claws and currents.</h3><p>Bright crabs steal fallen food and snap at nearby fish. Press the crab and swipe left, right, then left (or right, left, right). Eels coil before releasing an electric pulse and lunging. Press and hold on a coiling eel until its discharge cue. A short tap is not enough. With a keyboard: X swipes ordinary creatures, J/L alternate crab swipes, and holding H discharges a coiling eel. Defense gestures never count as stressful glass taps. Everything freezes when paused.</p></div>
-                ${icon('oyster')}<div><h3>Care leaves its treasures.</h3><p>Reach 1,000 points for a Bubble Chest. Welcome a baby for a Pearl Oyster. Repel an eel for a Watchlight Lantern; outwit a crab for a Tidekeeper Arch. Earn them anew each round, place three at a time, and tap them to bring them to life.</p></div>
-                ${icon('leaf')}<div><h3>Let the aquarium breathe.</h3><p>Each fish is randomly male or female, including babies. Males have contrasting fin colors, broad bright flank ribbons, or bolder natural spots and patches; each species keeps its recognizable pattern. Residents shows sex and adult pair counts. Adult parents need fullness above 60%, health above 70%, and water above 50%. They approach and circle before a birth; threats, poor water, or a full tank interrupt courtship. Babies must grow up before breeding. Sparse tanks breed more readily, after a shared 25-to-45-second respite that lengthens as the tank fills. A brief announcement welcomes each baby.</p></div>
-                ${icon('fish')}<div><h3>Give rivals space.</h3><p>Two adult male Brushstroke Bettas may display when they meet, then fight after four seconds. Tap the glass near either rival, or press K even if they are outside your view. This protective tap separates them without stress or waking visitors. Eight more seconds of fighting costs a fish its life. Separated rivals retreat and settle for ninety seconds. Zen care separates them automatically; pause freezes courtship and disputes.</p></div>
-                ${icon('leaf')}<div><h3>A gentle helping hand.</h3><p>Full fish have at least fifty seconds before seeking food; portions grow with the hungry population. Zen care automatically feeds, cleans, maintains a small population, and separates territorial rivals. Care still costs points; it is assistance, not invulnerability.</p></div>
-                ${icon('orbit')}<div><h3>A whole new point of view.</h3><p>Drag empty water to orbit. Pinch or scroll to zoom. Outside food aiming, tap the glass, fish, or creature for a reaction; G is the keyboard equivalent. Glass taps stir resting visitors without defending them or skipping their warning. Repeated tapping causes stress. Creature gestures defend; tap prizes to enjoy them or drag them along open sand. Each new round earns its own prizes; saved rounds retain placements.</p></div>
-                ${icon('wave')}<div><h3>A habitat, not a backdrop.</h3><p>Residents browse plant edges, explore formations, rest near shelter, and follow the lower channel in loose schools. Smaller fish can use openings that larger bodies cannot fit through. Crabs follow the sand banks and food settles on their slopes. Place prizes on level sand. Your aquarium keeps its shape when the screen rotates; the camera reframes instead.</p></div>
+            <div class="guide-intro">
+                <p>Choose a world and tap Start. Healthy fish earn points for more residents.</p>
+                <p><strong>Care.</strong> Tap Feed, then the water. Clean when needed, or let Zen care help.</p>
+                <p><strong>Protect.</strong> Follow visitor warnings to swipe or hold threats away. Pause any time you need a break.</p>
             </div>
-            <h3>Small steps, meaningful milestones</h3>
-            <p>Bronze at 1,000, Silver at 2,500, Gold at 5,000, and Platinum at 10,000 points. Master means keeping at least fifteen fish and all four species for three continuous minutes. Milestones celebrate briefly in the top message area, then fade while your aquarium keeps going.</p>
-            <div class="note-box"><strong>Keep the flow</strong><br>The see-through fish catalog and score details leave the aquarium visible. Dialogs and trays dismiss with an outside tap or Escape. Routine discoveries and bonuses appear in Recent moments, not repeated popups. Milestone notices keep the water moving. Only explicit pause, confirmations, and session summaries stop time.</div>
-            <div class="note-box"><strong>Keyboard</strong><br><span class="mono">M</span> menu &middot; <span class="mono">F</span> aim food &middot; <span class="mono">C</span> clean &middot; <span class="mono">B</span> catalog &middot; <span class="mono">T</span> tank prizes &middot; <span class="mono">Space</span> pause &middot; <span class="mono">I</span> immerse &middot; <span class="mono">R</span> reset camera &middot; arrow keys orbit &middot; <span class="mono">+ / -</span> zoom. During food aiming or a prize's Move action, arrows change x/depth, Enter confirms, and Escape cancels.</div>
-            <div class="note-box">No accounts, tracking, external assets, or ads. Progress lives only on this device, separately from Zenquarium. Install from a secure web address for offline play. Time never advances while you are away.</div>`;
+            <p class="guide-context" id="guide-context"></p>
+            <details class="settings-section guide-section" id="guide-care">
+                <summary>Care &amp; Zen care</summary>
+                <p>Tap Feed, then tap the water to drop food (5 points). Double-tap Feed for a quick surface drop. Clean when the water needs care (10 points).</p>
+                <p>Zen care feeds, cleans, and adds fish for you. You still defend against visitors.</p>
+            </details>
+            <details class="settings-section guide-section" id="guide-defenses">
+                <summary>Visitor defenses</summary>
+                <p>Follow the warning hints. Tapping alone won't defend your fish.</p>
+                <ul>
+                    <li><strong>Jellyfish, squid, octopus:</strong> press the creature, drag outward, then release. Repeat three times.</li>
+                    <li><strong>Crab:</strong> make three separate swipes: left, right, left (or the reverse).</li>
+                    <li><strong>Eel:</strong> hold it while it coils, until the discharge cue.</li>
+                </ul>
+                <p>Successful defenses earn points; quicker is better.</p>
+            </details>
+            <details class="settings-section guide-section" id="guide-breeding">
+                <summary>Breeding &amp; territorial rivals</summary>
+                <p>A healthy, well-fed adult male and female of the same species may have babies. Leave room for them to grow.</p>
+                <p>Male Brushstroke Bettas may fight. Tap near either rival when they flare to separate them; Zen care also intervenes.</p>
+            </details>
+            <details class="settings-section guide-section" id="guide-scoring">
+                <summary>Scoring &amp; milestones</summary>
+                ${scoringGuide()}
+            </details>
+            <details class="settings-section guide-section" id="guide-prizes">
+                <summary>Tank prizes</summary>
+                <p>Care earns decorations. Tap the points display, then Tank prizes, to place up to three. Tap a prize to enjoy it or drag it onto clear sand to move it.</p>
+                <p>Each new aquarium earns its own collection.</p>
+            </details>
+            <details class="settings-section guide-section" id="guide-controls">
+                <summary>Looking around</summary>
+                <p>Drag empty water to look around; pinch or scroll to zoom. Tap the points display, then Residents, to follow a fish. More views are in Menu &gt; Camera.</p>
+                <p>Tap the glass gently for a reaction. Menu &gt; Immerse hides the interface; use its exit button to return.</p>
+            </details>
+            <details class="settings-section guide-section" id="guide-saving">
+                <summary>Saving &amp; returning</summary>
+                <p>Use Save &amp; Return when you're done; Resume last session picks up where you left off. Nothing changes while you're away.</p>
+                <p>Starting a new aquarium replaces the saved one. Progress stays on this device.</p>
+            </details>
+            <details class="settings-section guide-section" id="guide-keyboard">
+                <summary>Keyboard shortcuts</summary>
+                <dl class="guide-shortcuts">
+                    <dt>Care</dt><dd>F: aim food; C: clean; B: add fish; T: tank prizes.</dd>
+                    <dt>View</dt><dd>Arrow keys: orbit; + / \u2212: zoom; R: reset; I: immerse.</dd>
+                    <dt>Place</dt><dd>While aiming food or moving a prize, arrows change position, Enter confirms, and Escape cancels.</dd>
+                    <dt>Protect</dt><dd>X: outward swipe; J / L: crab swipes; hold H: coiling eel; K: separate rival bettas.</dd>
+                    <dt>Other</dt><dd>M: menu; G: tap glass; Space: pause or resume; Escape: dismiss panels or leave Immerse.</dd>
+                </dl>
+            </details>`;
         openPanel('journal', 'The field guide.', 'CURIOSITY LOOKS GOOD ON YOU', tabs + (tab === 'guide' ? guide : discoveryContent()));
         panelContent().querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => showJournal(button.dataset.tab)));
     }
     function updateJournal() {
+        if ($('guide-context')) {
+            $('guide-context').hidden = !game;
+            if (game) setText('guide-context', game.state.paused ? 'Your aquarium is paused. Take your time.'
+                : 'Your aquarium keeps running. Tap Pause for a break.');
+        }
         panelContent().querySelector('[data-tab="achievements"]').textContent = `Discoveries \u00b7 ${Object.keys(profile.achievements).length}/${ZQ.ACHIEVEMENTS.length}`;
-        panelContent().querySelectorAll('[data-achievement]').forEach(card => {
-            const date = profile.achievements[card.dataset.achievement];
-            card.classList.toggle('unlocked', Boolean(date));
-            card.querySelector('small').textContent = date ? `Discovered ${date}` : 'Still to discover';
-        });
+        updateDiscoveries();
     }
     function showScore(anchor) {
         if (!game) return;
@@ -989,12 +1156,10 @@ const ZQApp = (() => {
             <div class="meter" id="water-meter" role="progressbar" aria-label="Water health" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><span id="water-bar"></span></div></div>
             <p id="detail-population"></p><p id="next-goal"></p><progress id="goal-progress" value="0" max="1000" aria-label="Next milestone"></progress>
             <div class="panel-actions"><button class="small-button" data-menu-action="residents">Residents</button><button class="small-button" data-menu-action="prizes">Tank prizes</button><button class="small-button" data-menu-action="activity">Recent moments</button></div>
+            <button class="quiet-button progress-link lifetime-link" data-menu-action="progress">Lifetime progress ${icon('arrow')}</button>
             <details class="settings-section"><summary>How scoring works</summary>
             <p id="detail-streak"></p>
-            <div class="note-box">30 seconds: \u00d71.5 &nbsp; / &nbsp; 90 seconds: \u00d72 &nbsp; / &nbsp; 180 seconds: \u00d73<br>All fish must be above 80% to build the streak. Below 50% resets your multiplier.</div>
-            <h3>Care pays off</h3><p>Perfect Tank: +25 every 60 seconds with five fish above 90% health. Biodiversity: +15 every 45 seconds with all four species. Baby Born: +10. Clean Sweep: +20 when water is above 70% before cleaning.</p>
-            <p>Quick defense: +60 within three active seconds of the first opportunity, falling to +20 by twenty-three seconds. Pauses and the eel's wait for its first coil do not count. This reward is not multiplied by the health streak. Creature Whisperer remains separate: +30 base points when a repelled visitor leaves without a direct crab capture; its health multiplier still applies.</p>
-            <h3>Every resident matters</h3><p>Fish lost: \u221215; starvation: \u221220. Repeated glass tapping: \u22125 and water damage. Neglected water: \u221210 every 30 seconds below 25%. Scores never go below zero.</p></details>`, anchor);
+            ${scoringGuide()}</details>`, anchor);
     }
     function updateScore() {
         const s = game.state, earning = s.fish.filter(f => f.health > 50 && f.growth === 1).length;
@@ -1031,10 +1196,11 @@ const ZQApp = (() => {
         openPanel('summary', s.outcome === 'victory' ? 'A beautiful place to pause.' : s.outcome === 'defeat' ? 'Every aquarium teaches us.' : 'Time well spent.',
             s.outcome === 'victory' ? 'A WELL-EARNED VICTORY' : 'YOUR AQUARIUM JOURNAL',
             `<p${s.outcome === 'defeat' ? ' class="error-text"' : ''}>${safeText(s.reason)}</p>
+            ${s.newAchievements.length ? `<h3>New discoveries</h3><p>${s.newAchievements.map(id => ZQ.ACHIEVEMENTS.find(a => a.id === id).name).join(' &middot; ')}</p>` : ''}
             <div class="session-stats"><div><strong>${number(s.score)}</strong><small>FINAL SCORE</small></div><div><strong>${duration(s.elapsed)}</strong><small>ACTIVE TIME</small></div><div><strong>${number(profile.highScore)}</strong><small>PERSONAL BEST</small></div>
             <div><strong>${s.stats.born}</strong><small>BABIES BORN</small></div><div><strong>${s.stats.lost}</strong><small>FISH LOST</small></div><div><strong>${s.stats.peak}</strong><small>PEAK RESIDENTS</small></div></div>
-            ${s.newAchievements.length ? `<h3>Discovered along the way</h3><p>${s.newAchievements.map(id => ZQ.ACHIEVEMENTS.find(a => a.id === id).name).join(' &middot; ')}</p>` : ''}
             <div class="panel-actions"><button class="primary-button" id="summary-home">Back to your worlds ${icon('arrow')}</button></div>`);
+        discoveryQueue = discoveryQueue.filter(event => !s.newAchievements.includes(event.achievement));
         $('summary-home').addEventListener('click', goHome);
         save();
     }
@@ -1391,6 +1557,7 @@ const ZQApp = (() => {
             game.state.paused = true;
             $('pause-reason').textContent = 'Welcome back. Your fish waited for you. Resume whenever you are ready.';
         }
+        deferDiscovery();
         stopAnimation(); suspendAudio(); releaseWakeLock();
         if (game && !game.state.ended) checkpointTank();
         else save();
