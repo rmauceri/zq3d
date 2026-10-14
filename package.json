@@ -1,0 +1,26 @@
+{
+  "name": "zq3d",
+  "version": "0.1.0",
+  "description": "Zenquarium 3D - A little world. A deeper calm. A living 3D aquarium.",
+  "main": "app.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rmauceri/zq3d.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/rmauceri/zq3d/issues"
+  },
+  "homepage": "https://github.com/rmauceri/zq3d#readme",
+  "dependencies": {
+    "@vercel/analytics": "^2.0.1"
+  }
+}
