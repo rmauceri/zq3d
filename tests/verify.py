@@ -337,7 +337,8 @@ def main():
             check("WebGL context loss safely pauses and rebuilds graphics", graphics_recovery)
 
             def audio_and_settings():
-                menu_action("sound")
+                if not page.evaluate("ZQApp.settings.sound"):
+                    menu_action("sound")
                 require(page.evaluate("ZQApp.settings.sound"), "Sound did not enable")
                 menu_action("settings")
                 page.locator("#settings-display > summary").click()

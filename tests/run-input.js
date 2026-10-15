@@ -119,6 +119,13 @@ const returnHome = () => {
 };
 
 try {
+    assert.equal(evaluate('ZQApp.settings.sound'), true, 'First-run sound is not enabled');
+    assert.equal(evaluate('ZQApp.settings.volume'), 0.45);
+    assert.equal($('sound-button').getAttribute('aria-label'), 'Sound controls. Sound on');
+    assert(!evaluate("audioCalls.includes('enable')"), 'Audio started before a user interaction');
+    w.document.querySelector('.theme-option[aria-pressed="true"]').click();
+    assert.equal(evaluate('audioCalls.at(-1)'), 'enable', 'Choosing a theme did not start the enabled soundscape');
+    assert.equal(evaluate('ZQApp.game'), null, 'Enabling preview sound started an aquarium');
     assert.equal($('preview-badge'), null);
     assert.equal($('renderer-label'), null);
     assert($('resume-card').hidden && $('resume-button').hidden, 'An empty profile offered a saved aquarium');
@@ -308,9 +315,13 @@ try {
     assert.equal($('tray').dataset.kind, 'volume');
     assert.equal($('tray').dataset.anchor, 'sound');
     assert.equal($('sound-button').getAttribute('aria-expanded'), 'true');
-    assert(!evaluate('ZQApp.settings.sound'), 'Opening sound controls unexpectedly enabled audio');
+    assert(evaluate('ZQApp.settings.sound'), 'Opening sound controls muted the first-run sound');
     $('dock-volume').value = '45'; $('dock-volume').dispatchEvent(new w.Event('input', { bubbles: true }));
-    $('volume-mute').click(); $('volume-mute').click();
+    $('volume-mute').click();
+    assert.equal(stored().settings.sound, false, 'Muting was not saved');
+    assert.equal(evaluate('audioCalls.at(-1)'), 'disable', 'Muting left the soundscape enabled');
+    $('volume-mute').click();
+    assert.equal(stored().settings.sound, true, 'Enabling sound was not saved');
     assert.equal(evaluate('ZQApp.settings.volume'), 0.45, 'Muting lost the preferred volume');
     $('dock-volume').value = String(initialVolume * 100);
     $('dock-volume').dispatchEvent(new w.Event('input', { bubbles: true }));
@@ -319,7 +330,6 @@ try {
     assert.equal($('sound-button').getAttribute('aria-expanded'), 'false');
     assert.equal(evaluate('ZQApp.game'), null);
     console.log('PASS Welcome sound uses the shared light-dismiss volume flyout without starting a tank or discarding mute volume');
-    $('sound-button').click(); $('volume-mute').click(); key('keydown', 'Escape');
     assert(evaluate('ZQApp.settings.sound'));
     pump(3);
     const homeRenderer = evaluate('ZQApp.renderer');

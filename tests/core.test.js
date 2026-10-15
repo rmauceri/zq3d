@@ -41,6 +41,18 @@
         return game.state.creature;
     };
 
+    test('First-run sound defaults on without overriding saved mute or volume preferences', () => {
+        equal(core.DEFAULT_SETTINGS.sound, true);
+        equal(core.DEFAULT_SETTINGS.volume, 0.45);
+        const saved = envelope(make());
+        for (const sound of [false, true]) for (const volume of [0, 0.23]) {
+            saved.settings.sound = sound;
+            saved.settings.volume = volume;
+            const restored = core.validateSave(saved);
+            equal(restored.settings.sound, sound);
+            equal(restored.settings.volume, volume);
+        }
+    });
     test('Five worlds preserve four species, existing prices, and progression', () => {
         equal(Object.keys(core.THEMES), ['koi', 'tropical', 'deep', 'zen', 'ink']);
         equal(Object.values(core.THEMES).map(t => t.fish.map(f => f.cost)),

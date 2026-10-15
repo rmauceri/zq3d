@@ -165,7 +165,7 @@ const ZQ = (() => {
         { id: 'platinum', name: 'Platinum Aquarist', score: 10000, description: 'An extraordinary aquarium. A well-earned moment.' },
         { id: 'master', name: 'Master Aquarist', score: null, description: 'Fifteen fish, all four species, three continuous minutes. A living balance.' }
     ];
-    const DEFAULT_SETTINGS = Object.freeze({ sound: false, volume: 0.45, quality: 'auto', motion: 'system', keepAwake: false });
+    const DEFAULT_SETTINGS = Object.freeze({ sound: true, volume: 0.45, quality: 'auto', motion: 'system', keepAwake: false });
     const CHALLENGE_VARIANTS = {
         koi: [['crab', 'Pebble Crab', '#f16b47', '#ffe09a', 1.9], ['eel', 'Ribbon Eel', '#718766', '#eedcb4', 2]],
         tropical: [['crab', 'Hermit Crab', '#ff9742', '#fff09b', 2], ['eel', 'Moray Eel', '#8f9952', '#dfdd90', 2.2]],

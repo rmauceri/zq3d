@@ -111,7 +111,9 @@ the hosted website, and different browsers can have separate progress.
   optional Zen care.
 - **Synthesized sound**: filtered water, theme-specific pads and melodies, subtle
   stereo positioning, procedural reverberation, and gentle event sounds. Sound
-  starts only after a user interaction and can be muted or adjusted.
+  is enabled by default for new players at 45% volume, starting after an
+  interaction such as choosing a theme or pressing Start. Sound can be muted
+  or adjusted; saved mute and volume preferences are preserved.
   Fish bubbles restore the original Zenquarium's soft ascending bloop, panned
   to the visible fish rather than attached to every background particle.
   The water bed uses a DC-free, band-limited loop with settled filter state;
