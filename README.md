@@ -2,7 +2,7 @@
 
 **A little world. A deeper calm.**
 
-A standalone, dependency-free 3D aquarium with the heart of
+A standalone 3D aquarium with the heart of
 [Zenquarium](https://github.com/rmauceri/zenquarium). This repository is independent
 of the original game. The repository and published URL retain the project name
 `zq3d`; the app is named **Zenquarium 3D**.
@@ -14,7 +14,9 @@ This is separate from the save schema and offline-shell cache versions.
 
 Play at **https://rmauceri.github.io/zq3d/**, or open `index.html` directly in a
 modern browser. All graphics, species, music, and effects are generated locally.
-No build, account, CDN, or internet connection is needed for local-file play.
+No build, account, or internet connection is needed for local-file gameplay.
+The separate analytics integration loads from a CDN when available; gameplay
+does not depend on it.
 
 For installation and service-worker offline support, serve the **repository root**
 over HTTPS or localhost. For example, from the repository root:
@@ -136,12 +138,14 @@ the hosted website, and different browsers can have separate progress.
   with the guide, sound, and Settings controls at the upper right. Clicking the
   icon and title opens About, with the Enso logo left of **Zenquarium 3D** and
   the app version directly underneath the title. The themed tagline introduces
-  the description, privacy notes, and
+  the description, on-device save and Vercel Analytics privacy notes, and
   [original Zenquarium](https://rmauceri.github.io/zenquarium) link below.
   About dismisses with an outside tap or Escape, without a Done button.
-  The bottom rail keeps personal best, discoveries, **Progress**, and
-  **Resume last session** outside the tank. Progress opens personal records
-  and the discovery collection without starting an aquarium.
+  The bottom rail keeps personal best, discoveries, and **Resume last session**
+  outside the tank. Personal best and discoveries form one clickable,
+  keyboard-accessible area sized to the text group, not the full footer, that
+  opens **Your progress** with personal records
+  and the discovery collection, without a separate Progress link or starting an aquarium.
   Personal-best score, highest milestone, and largest population lead the
   records, followed by worlds visited, babies born, and discoveries. Completed
   sessions and the longest completed session sit under **More statistics**;
@@ -241,6 +245,26 @@ the hosted website, and different browsers can have separate progress.
   stays identical. Resizing reuses meshes; quality changes rebuild scenery
   without rebuilding residents or visitors. Music uses bounded Web Audio
   clock lookahead instead of depending on animation-frame timing.
+- **Theme-specific scenic containment**: a two-layer composition pairs low
+  scenery near the habitat with a taller, distant landscape around the entire
+  camera range. Tropical Reef uses layered outcrops and coral shelves; Koi Pond
+  has rounded mossy banks and reeds; Deep Ocean keeps sparse dark formations,
+  mineral spires, and restrained luminous tips; Zen Garden uses lower asymmetric
+  stone groups with generous gaps; Pen & Ink layers botanical silhouettes and
+  softer lavender-tinted rockwork. The camera stays inside the surround at every
+  orbit, zoom, and follow position; no cutaway, transparency, or camera
+  restrictions are used. Nearby sand lanes stay open, and all new decoration
+  remains outside the supplied swimming bounds, including narrower saved tanks.
+  Battery retains each world's main skyline; higher qualities add cosmetic
+  detail within the existing vertex ceilings. Start and gameplay
+  share the cached composition. Canvas uses the same scenery, with projected
+  bank silhouettes, muted distant colors, and ground clipping. Seeded variation
+  in stone widths, heights, depths, and angular gaps breaks up regular spacing
+  without rearranging the world on resize. Fuller, unevenly spread plant clusters
+  add life around the formations; Deep Ocean and Zen Garden remain quieter.
+  Physical habitat and gameplay are unchanged. The five-world treatment was
+  user-approved; the requested variation and planting refinements are ready for review.
+  See [the scenic containment plan](scenic-containment-plan.md).
 - **Organic scenery without extra animation load**: eroded, asymmetric rock
   silhouettes, curved leaves, uneven coral branches, and varying plant widths,
   heights, and lean are generated once into the cached scene mesh. Broad raised
@@ -289,7 +313,7 @@ the hosted website, and different browsers can have separate progress.
 | Inspect / follow | Aquarium dashboard > **Residents**; choose **Follow** |
 | Stop following | Menu > **Camera** > **Stop following**; drag to orbit |
 | Aquarium status | Compact points-and-condition control opens **Your aquarium** |
-| Lifetime progress | Start-page **Progress** or **Your aquarium > Lifetime progress** |
+| Lifetime progress | Start-page **Personal best / Discoveries** area or **Your aquarium > Lifetime progress** |
 | Fend off jellyfish, squid, or octopus | Press on it, drag outward, release; three swipes. Keyboard: `X` |
 | Defend against a crab | Press on it and alternate left/right swipes three times. Keyboard: `J`, `L`, `J` (or `L`, `J`, `L`) |
 | Defend against an eel | Press and hold on it for 0.7 seconds during its 2.6-second coil warning. Keyboard: hold `H` |
@@ -587,10 +611,21 @@ or an invulnerability mode.
 - WebGL loss pauses the game and rebuilds GPU resources on restoration.
   Browsers without usable WebGL get an explicitly labeled, playable Canvas 2D
   perspective renderer; this compatibility mode is not claimed to be WebGL 3D.
-- No telemetry, external requests, notification permissions, downloaded audio,
-  account storage, cookies, or IndexedDB are used.
+- No account is required. Aquarium saves, personal records, and discoveries
+  stay in localStorage; the app does not send them to analytics. Audio remains
+  locally generated. The app does not request notification permission or use
+  account storage or IndexedDB.
 
-**Hosting privacy:** Gameplay and saves remain on the device. GitHub Pages records
+**Hosting and analytics privacy:** The hosted site includes Vercel Web Analytics
+for visit and site-usage measurement. This is telemetry, so the app is not
+telemetry-free. `index.html` imports the analytics integration from jsDelivr;
+it can make external CDN and analytics requests. The current integration uses
+automatic page-view tracking, with no custom gameplay events or saved-profile
+payloads. See [Vercel Analytics privacy](https://vercel.com/docs/analytics/privacy-policy)
+for collected information and processing details. Analytics is not part of the
+offline shell and is not required for aquarium gameplay or local saving.
+
+Hosting providers can also process requests and access logs. GitHub Pages records
 visitor IP addresses for hosting security; see
 [GitHub Pages data collection](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages#data-collection).
 
@@ -624,12 +659,13 @@ Zenquarium palette on both the welcome screen and in play: warm koi colors,
 tropical greens, deep-ocean blues, quiet charcoal/copper, or parchment and ink.
 An explicit `clawpilotTheme=light` or `clawpilotTheme=dark` URL selects the shared
 neutral interface instead. Scene colors remain part of the inherited game-theme
-configuration. Scripts use ordered browser
-IIFEs, not ES-module fetches, so opening the HTML file remains supported.
+configuration. Gameplay scripts use ordered browser IIFEs, so opening the HTML
+file remains supported. Analytics is a separate CDN-loaded ES module.
 
 ## Development checks
 
-The game has **no runtime or build dependencies**. The optional browser
+Aquarium gameplay has **no runtime or build dependencies**; the hosted analytics
+integration uses `@vercel/analytics` through a CDN import. The optional browser
 verification harness requires Python and Playwright plus an installed Edge or
 Chrome. It starts a loopback-only temporary server and closes it and its browser
 when finished. The full suite uses software-rendered 3D and can be CPU-intensive;

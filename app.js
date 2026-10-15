@@ -1063,7 +1063,9 @@ const ZQApp = (() => {
         openPanel('about', 'Zenquarium 3D', '',
             `<p id="about-tagline" class="brand-tagline" tabindex="-1">A little world. <span>A deeper calm.</span></p>
             <p id="about-description">The calm of Zenquarium, in three dimensions. Explore five living worlds, care for curious fish, and enjoy locally generated sights and sound.</p>
-            <p>Created with care. No accounts, telemetry, or external services. Your progress stays on this device.</p>
+            <p>Created with care. No account is needed. Your aquarium and progress are saved on this device, not sent to analytics.</p>
+            <p>The hosted site uses Vercel Web Analytics to measure visits and site usage. This is telemetry, separate from your saved progress.
+            <a href="https://vercel.com/docs/analytics/privacy-policy" target="_blank" rel="noopener noreferrer">About Vercel Analytics privacy <span aria-hidden="true">&nearr;</span></a></p>
             <a class="original-link" href="https://rmauceri.github.io/zenquarium" target="_blank" rel="noopener noreferrer">Looking for the original Zenquarium? <span aria-hidden="true">&nearr;</span></a>`);
         $('about-tagline').focus({ preventScroll: true });
         $('panel-content').scrollTop = 0;

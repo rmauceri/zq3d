@@ -17,6 +17,7 @@ const ZQRenderer = (() => {
         prizeWood: '#795540', prizeGold: '#d2b272', shell: '#d8bbae', pearl: '#fff3df'
     };
     const color = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const colorHex = rgb => '#' + rgb.map(n => Math.round(n * 255).toString(16).padStart(2, '0')).join('');
     const mix = (a, b, t) => a.map((n, i) => n + (b[i] - n) * t);
     const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
     const dot = (a, b) => a.reduce((sum, n, i) => sum + n * b[i], 0);
@@ -385,13 +386,22 @@ const ZQRenderer = (() => {
 
     const plantProfile = plant => {
         const phase = plant.x * 2.71 + plant.z * 3.19 + plant.h * 1.37;
-        return { phase, width: 0.83 + Math.sin(phase) * 0.12,
+        return { phase, width: (0.83 + Math.sin(phase) * 0.12) * (plant.spread ?? 1),
             height: 0.89 + Math.cos(phase * 1.3) * 0.08, depth: 0.85 + Math.sin(phase * 0.7) * 0.1,
             lean: Math.sin(phase * 0.9) * 0.025 };
     };
     const groundHeight = (theme, bounds, x, z, habitat) => {
         return ZQ.terrainHeight(habitat?.terrain || ZQ.createTerrain(theme.id, bounds), x, z);
     };
+    function cameraDistance(bounds, aspect, zoom, followed) {
+        const limits = PARAMS.camera, tangent = Math.tan(PARAMS.fov / 2);
+        const halfHeight = (bounds.surface - bounds.floor) * 0.5;
+        const fit = Math.min((bounds.width + 0.2) / (tangent * aspect),
+            (halfHeight + 0.2) / tangent) + bounds.depth * 0.35;
+        return ZQ.clamp(fit * zoom * (followed ? 0.62 : 1), limits.minDistance, limits.maxDistance);
+    }
+    const scenicRadius = bounds => Math.hypot(bounds.width, bounds.depth)
+        + cameraDistance(bounds, Number.EPSILON, PARAMS.camera.maxZoom, false) + 1.5;
     function plantGeometry(g, plant, floor, theme, random) {
         const start = g.vertices.length, profile = plantProfile(plant);
         const { x, z, h, form } = plant, pigment = color(plant.tint);
@@ -424,7 +434,7 @@ const ZQRenderer = (() => {
                 const reach = 0.7 + Math.sin(i * 3.7 + profile.phase) * 0.25;
                 const end = [x + Math.cos(angle) * h * 0.32 * reach, root[1] + h * (0.18 + 0.06 * Math.cos(angle)), z + Math.sin(angle) * h * 0.28 * reach];
                 g.tube([root, [(root[0] + end[0]) / 2, end[1] - h * 0.12, (root[2] + end[2]) / 2], end], 0.055, tint, 6, 5);
-                g.sphere(end, [0.06, 0.07, 0.06], mix(tint, color(theme.light), 0.3), 6, 4, 6);
+                if (!plant.distant) g.sphere(end, [0.06, 0.07, 0.06], mix(tint, color(theme.light), 0.3), 6, 4, 6);
             }
         } else if (form === 'fan' || form === 'anemone') {
             const luminous = theme.id === 'deep';
@@ -435,12 +445,12 @@ const ZQRenderer = (() => {
                 const mid = [x + spread * h * 0.2, floor + h * 0.62, z + (form === 'anemone' ? Math.sin(i * 2.4) * 0.12 : 0)];
                 const end = [x + spread * h * 0.3, floor + h * (0.9 - Math.abs(spread) * 0.13) * length, mid[2]];
                 g.tube([root, mid, end], form === 'anemone' ? 0.023 : 0.013, tint, form === 'anemone' ? 4 : 6, 4);
-                if (luminous) g.sphere(end, [0.045, 0.055, 0.045], pigment, 11, 4, 6);
+                if (luminous) g.sphere(end, plant.distant ? [0.1, 0.12, 0.1] : [0.045, 0.055, 0.045], pigment, 11, 4, 6);
                 else g.tube([mid, [mid[0] + h * 0.07, mid[1] + h * 0.1, mid[2]]], 0.011, tint, 6, 4);
             }
         } else if (form === 'spire') {
             g.tube(path.slice(0, 7), h * 0.06, tint, 6, 5);
-            for (const j of [3, 5, 7]) g.sphere(path[j], [0.06, 0.1, 0.06], pigment, 11, 4, 6);
+            for (const j of [3, 5, 7]) g.sphere(path[j], plant.distant ? [0.12, 0.2, 0.12] : [0.06, 0.1, 0.06], pigment, 11, 4, 6);
         } else if (form === 'ribbon' || form === 'reed') {
             for (let i = 0; i < 7; i++) {
                 const offset = (i - 3) * (plant.grove ? 0.16 : 0.07);
@@ -544,13 +554,14 @@ const ZQRenderer = (() => {
                 ctx.beginPath(); ctx.moveTo(0, -h * 0.3); ctx.quadraticCurveTo(spread * h * 0.2, -h * 0.62, x, y); ctx.stroke();
                 if (theme.id === 'deep') {
                     ctx.shadowColor = plant.tint; ctx.shadowBlur = 5;
-                    ctx.beginPath(); ctx.arc(x, y, 0.035, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+                    ctx.beginPath(); ctx.arc(x, y, plant.distant ? 0.08 : 0.035, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
                 }
             }
         } else if (form === 'spire') {
             ctx.lineWidth = h * 0.12; path([[0, 0], [0.025, -h * 0.7]]);
             for (const level of [0.35, 0.6, 0.85]) {
-                ctx.shadowColor = plant.tint; ctx.shadowBlur = 5; ctx.beginPath(); ctx.ellipse(0, -h * level, 0.05, 0.08, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.shadowColor = plant.tint; ctx.shadowBlur = 5; ctx.beginPath();
+                ctx.ellipse(0, -h * level, plant.distant ? 0.1 : 0.05, plant.distant ? 0.16 : 0.08, 0, 0, Math.PI * 2); ctx.fill();
             }
         } else if (form === 'ribbon' || form === 'reed') {
             for (let i = 0; i < 7; i++) {
@@ -568,6 +579,78 @@ const ZQRenderer = (() => {
             }
         }
         ctx.restore();
+    }
+
+    function surroundAngles(count, random) {
+        const gaps = Array.from({ length: count }, () => 0.65 + random() * 0.7);
+        const total = gaps.reduce((sum, gap) => sum + gap, 0);
+        let angle = (random() - 0.5) * 0.2;
+        return gaps.map(gap => {
+            const current = angle;
+            angle += gap / total * Math.PI * 2;
+            return current;
+        });
+    }
+
+    function themedSurround(theme, bounds, surroundRadius, plantCount, rocks, plants) {
+        const profiles = {
+            koi: { count: 15, seed: 45137, width: 11, depth: 8, height: 4.5, rise: 3 },
+            deep: { count: 11, seed: 62039, width: 9, depth: 7, height: 4, rise: 4 },
+            zen: { count: 12, seed: 91367, width: 11, depth: 8, height: 3.5, rise: 3 },
+            ink: { count: 14, seed: 33791, width: 10, depth: 7, height: 4.5, rise: 4 }
+        };
+        const profile = profiles[theme.id], random = seeded(profile.seed);
+        const rock = color(theme.rock), water = color(theme.water);
+        const bank = (pos, radius, tint, extra = {}) => {
+            rocks.push({ pos, radius, tint: colorHex(tint), distant: true, ...extra });
+        };
+        const angles = surroundAngles(profile.count, random);
+        for (let i = 0; i < profile.count; i++) {
+            const angle = angles[i];
+            const width = (profile.width + 2) * (0.65 + random() * 0.7);
+            const depth = (profile.depth + 1) * (0.78 + random() * 0.44);
+            const h = (profile.height + profile.rise * 0.5) * (0.65 + random() * 0.7);
+            const distance = surroundRadius + Math.hypot(width, depth) + 1 + random() * (theme.id === 'ink' ? 6 : 4);
+            const pos = [Math.sin(angle) * distance, bounds.floor + h * 0.08, Math.cos(angle) * distance];
+            const pigment = color(theme.plants[i % theme.plants.length]);
+            const tint = mix(rock, pigment, theme.id === 'deep' ? 0.1 : theme.id === 'ink' ? 0.24 : 0.15);
+            bank(pos, [width, h, depth], tint, { roughness: theme.id === 'koi' ? 0.06 : 0.12, silhouette: true });
+            if (theme.id === 'koi') {
+                bank([pos[0], pos[1] + h * 0.69, pos[2]], [width * 0.7, h * 0.16, depth * 0.7],
+                    mix(pigment, rock, 0.15), { roughness: 0.08 });
+                if (plantCount > 20) bank([pos[0] + width * 0.28, bounds.floor + h * 0.05, pos[2]],
+                    [width * 0.58, h * 0.6, depth * 0.6], tint, { roughness: 0.05 });
+            } else if (theme.id === 'deep' && i % 3 === 0) {
+                bank([pos[0], pos[1] + h * 0.8, pos[2]], [width * 0.22, h * 0.9, depth * 0.25],
+                    mix(rock, water, 0.2), { roughness: 0.18, spire: true });
+                bank([pos[0], pos[1] + h * 1.52, pos[2]], [width * 0.09, h * 0.12, depth * 0.1],
+                    pigment, { roughness: 0.08, luminous: true });
+            } else if (theme.id === 'zen' && i % 3 === 1) {
+                bank([pos[0], pos[1] + h * 0.55, pos[2]],
+                    [width * 0.5, h * 0.28, depth * 0.55], mix(pigment, rock, 0.4), { roughness: 0.08 });
+                if (plantCount > 20) bank([pos[0] + width * 0.24, pos[1] + h * 0.45, pos[2]],
+                    [width * 0.25, h * 0.75, depth * 0.35], rock, { roughness: 0.07 });
+            } else if (theme.id === 'ink' && i % 2 === 0) {
+                bank([pos[0] - width * 0.2, pos[1] + h * 0.22, pos[2]],
+                    [width * 0.7, h * 0.8, depth * 0.75], mix(tint, water, 0.18), { roughness: 0.15 });
+            }
+            const planted = theme.id === 'zen' ? i % 3 !== 2 : theme.id === 'deep' ? i % 4 === 2
+                : theme.id === 'koi' ? i % 3 !== 2 : i % 7 !== 6;
+            if (!planted) continue;
+            const form = theme.id === 'koi' ? 'reed' : theme.id === 'deep' ? ['fan', 'spire', 'anemone'][i % 3]
+                : theme.id === 'zen' ? 'ribbon' : 'ink-leaf';
+            const clumps = theme.id === 'deep' || theme.id === 'zen' ? 2 : 3;
+            for (let j = 0; j < clumps; j++) {
+                const offset = (j - (clumps - 1) * 0.5 + (random() - 0.5) * 0.25) * width * 0.45;
+                plants.push({ x: pos[0] + Math.cos(angle) * offset, z: pos[2] - Math.sin(angle) * offset,
+                    floor: pos[1] + h * (0.55 + random() * 0.1),
+                    h: (theme.id === 'zen' ? 3.5 : theme.id === 'deep' ? 4 : 5.5) + random() * 2.5,
+                    form, grove: theme.id === 'koi' || theme.id === 'ink',
+                    spread: theme.id === 'koi' ? 2 : theme.id === 'ink' ? 1.3 : theme.id === 'zen' ? 1.5 : 1,
+                    tint: colorHex(mix(color(theme.plants[(i + j) % theme.plants.length]), water,
+                        theme.id === 'ink' ? 0.38 : 0.15)), distant: true });
+            }
+        }
     }
 
     function environment(theme, bounds, plantCount, groundExtent) {
@@ -601,14 +684,69 @@ const ZQRenderer = (() => {
         g.triangle(outerFloor[0], outerFloor[2], outerFloor[3], sand, 5);
         const rocks = habitat.rocks.flatMap(r => r.parts ? r.parts.map(p => ({ ...p, moss: r.moss })) : [r]);
         const sceneryRocks = [], sceneryPlants = [];
-        const formations = plantCount > 40 ? 12 : plantCount > 20 ? 8 : 4;
+        const reef = theme.id === 'tropical';
+        const scale = Math.min(1, bounds.width / 6.8, bounds.depth / ZQ.CONFIG.depth);
+        const shoulders = reef ? [
+            { x: -w * 0.46, z: -1, edge: 'z', radius: [w * 0.4, 0.72 * scale, 1.05 * scale] },
+            { x: w * 0.43, z: -1, edge: 'z', radius: [w * 0.42, 1.05 * scale, 1.15 * scale] },
+            { x: -w * 0.01, z: -1, edge: 'z', radius: [w * 0.31, 0.5 * scale, 0.72 * scale] },
+            { x: -1, z: bounds.depth * 0.08, edge: 'x', radius: [0.8 * scale, 0.24 * scale, bounds.depth * 0.65] },
+            { x: 1, z: bounds.depth * 0.38, edge: 'x', radius: [0.72 * scale, 0.2 * scale, bounds.depth * 0.5] },
+            { x: -w * 0.56, z: 1, edge: 'z', radius: [w * 0.25, 0.18 * scale, 0.65 * scale] },
+            { x: w * 0.48, z: 1, edge: 'z', radius: [w * 0.3, 0.22 * scale, 0.7 * scale] }
+        ] : [];
+        const formations = Math.max(reef ? shoulders.length : 0, plantCount > 40 ? 12 : plantCount > 20 ? 8 : 4);
         for (let i = 0; i < formations; i++) {
+            if (reef) {
+                const shoulder = shoulders[i % shoulders.length], layer = Math.floor(i / shoulders.length);
+                const radius = shoulder.radius.map(n => n * (layer ? 0.68 : 1));
+                const edge = shoulder.edge === 'x' ? 0 : 2, sign = edge === 0 ? shoulder.x : shoulder.z;
+                const pos = [shoulder.x, floor + radius[1] * 0.42, shoulder.z];
+                // Include the rock's contact shadow in its clearance from the playable rectangle.
+                pos[edge] = sign * ((edge === 0 ? w : bounds.depth) + radius[edge] * 1.12 + 0.16 + layer * 0.6 * scale);
+                if (layer) pos[edge === 0 ? 2 : 0] += (i % 2 ? 1 : -1) * 0.5 * scale;
+                sceneryRocks.push({ pos, radius, roughness: 0.1,
+                    tint: colorHex(mix(rock, color(theme.plants[(i + 3) % theme.plants.length]), 0.16)) });
+                continue;
+            }
             const side = i % 2 ? 1 : -1;
             const x = side * (w + 1.3 + Math.floor(i / 2) * 1.7);
             const z = i % 4 < 2 ? -4.3 - random() * 2 : 7.5 + random();
             const h = 0.35 + random() * 0.9;
             sceneryRocks.push({ pos: [x, floor + h * 0.5, z], radius: [0.6 + random() * 0.7, h, 0.65] });
         }
+        const surroundRadius = scenicRadius(bounds);
+        if (reef) {
+            const surroundRandom = seeded(18427);
+            const angles = surroundAngles(18, surroundRandom);
+            // Keep the complete formations outside every orbit/follow pose, including a near-plane margin.
+            for (let i = 0; i < 18; i++) {
+                const angle = angles[i];
+                const width = 12 * (0.65 + surroundRandom() * 0.7), depth = 9 * (0.78 + surroundRandom() * 0.44);
+                const h = 8.25 * (0.65 + surroundRandom() * 0.7);
+                const distance = surroundRadius + Math.hypot(width, depth) + 0.7 + surroundRandom() * 4;
+                const pos = [Math.sin(angle) * distance, floor + h * 0.08, Math.cos(angle) * distance];
+                const pigment = mix(rock, color(theme.plants[i % theme.plants.length]), 0.38);
+                const tint = colorHex(pigment);
+                sceneryRocks.push({ pos, radius: [width, h, depth], roughness: 0.13, tint, distant: true, silhouette: true });
+                const ledges = plantCount > 40 ? 3 : plantCount > 20 ? 2 : 1;
+                for (let j = 0; j < ledges; j++) {
+                    const crown = mix(color(theme.plants[(i + j) % theme.plants.length]), color(theme.water), 0.48);
+                    const tint = colorHex(crown);
+                    sceneryRocks.push({ pos: [pos[0], pos[1] + h * (0.45 + j * 0.14), pos[2]],
+                        radius: [width * (0.85 - j * 0.16), 0.26 + j * 0.06, depth * (0.85 - j * 0.16)],
+                        roughness: 0.08, tint, distant: true });
+                }
+                if (i % 2 === 1) for (let j = 0; j < 2; j++) {
+                    const offset = (j - 0.5 + (surroundRandom() - 0.5) * 0.3) * width * 0.65;
+                    const pigment = mix(color(theme.plants[(Math.floor(i / 2) + j) % theme.plants.length]), color(theme.water), 0.28);
+                    const tint = colorHex(pigment);
+                    sceneryPlants.push({ x: pos[0] + Math.cos(angle) * offset, z: pos[2] - Math.sin(angle) * offset,
+                        floor: pos[1] + h * (0.55 + surroundRandom() * 0.1),
+                        h: 4.5 + surroundRandom() * 2.5, form: j ? 'branch' : 'fan', tint, distant: true });
+                }
+            }
+        } else themedSurround(theme, bounds, surroundRadius, plantCount, sceneryRocks, sceneryPlants);
         const extraPlants = Math.max(theme.id === 'ink' ? 8 : 0, plantCount - habitat.plants.length);
         const innerPlants = ['zen', 'ink'].includes(theme.id) ? Math.min(extraPlants, plantCount > 20 ? 12 : 8) : 0;
         for (let i = 0; i < innerPlants; i++) {
@@ -619,24 +757,47 @@ const ZQRenderer = (() => {
                 tint: theme.plants[i % theme.plants.length], form: theme.id === 'zen' ? 'ribbon' : 'ink-leaf' });
         }
         for (let i = innerPlants; i < extraPlants; i++) {
+            if (reef) {
+                const cluster = i % shoulders.length, shoulder = sceneryRocks[cluster];
+                const rear = cluster < 3, layer = Math.floor(i / shoulders.length);
+                const h = (rear ? 1.15 + random() * 0.65 : 0.3 + random() * 0.35) * scale;
+                const edge = shoulders[cluster].edge === 'x' ? 0 : 2;
+                const sign = Math.sign(shoulder.pos[edge]);
+                const pos = [...shoulder.pos];
+                pos[edge === 0 ? 2 : 0] += (layer - 1) * 0.38 * scale;
+                // Coral crowns, branching tips, and their sway remain beyond the swimming bounds.
+                pos[edge] = sign * ((edge === 0 ? w : bounds.depth) + Math.max(0.45 * h + 0.16, shoulder.radius[edge] * 0.8)
+                    + layer * 0.28 * scale);
+                const source = habitat.plants[i % habitat.plants.length];
+                if (rear) pos[2] = shoulder.pos[2];
+                sceneryPlants.push({ x: pos[0], z: pos[2], h, bank: rear ? cluster : null,
+                    tint: source.tint, form: source.form });
+                continue;
+            }
             const side = i % 2 ? 1 : -1;
             sceneryPlants.push({ x: side * (w + 0.9 + random() * 7), z: i % 3 ? -4 - random() * 3 : 7.5 + random(),
                 h: 0.65 + random() * 2.5, tint: habitat.plants[i % habitat.plants.length].tint,
                 form: habitat.plants[i % habitat.plants.length].form });
         }
         sceneryRocks.forEach(r => { r.pos[1] += height(r.pos[0], r.pos[2]) - floor; });
-        for (const { pos, radius, moss, roughness } of [...rocks, ...sceneryRocks]) {
+        for (const { pos, radius, moss, roughness, tint, distant, luminous } of [...rocks, ...sceneryRocks]) {
             const solid = rocks.some(r => r.pos === pos);
-            g.sphere([pos[0], height(pos[0], pos[2]) + 0.015, pos[2]], [radius[0] * 1.12, 0.018, radius[2] * 1.12],
+            if (!distant) g.sphere([pos[0], height(pos[0], pos[2]) + 0.015, pos[2]], [radius[0] * 1.12, 0.018, radius[2] * 1.12],
                 mix(sand, rock, theme.id === 'ink' ? 0.65 : 0.38), 10, solid ? 3 : 2, solid ? 12 : 6);
-            g.sphere(pos, radius, mix(rock, sand, random() * 0.3), 6, solid ? 8 : 4, solid ? (plantCount > 20 ? 12 : 9) : 6, roughness ?? 0.2);
-            if (moss || theme.id === 'koi' && random() > 0.65)
+            g.sphere(pos, radius, tint ? color(tint) : mix(rock, sand, random() * 0.3), luminous ? 11 : distant ? 12 : 6,
+                solid ? 8 : distant && radius[1] > 1 ? 6 : 4,
+                solid ? (plantCount > 20 ? 12 : 9) : distant && radius[1] > 1 ? 10 : 6, roughness ?? 0.2);
+            if (moss || !distant && theme.id === 'koi' && random() > 0.65)
                 g.sphere([pos[0], pos[1] + radius[1] * 0.8, pos[2]], [radius[0] * 0.56, radius[1] * 0.18, radius[2] * 0.6],
                     color(theme.plants[0]), 6, 5, 8);
         }
         const plants = habitat.plants;
         const allPlants = [...plants, ...sceneryPlants];
-        sceneryPlants.forEach(p => { p.floor = height(p.x, p.z); });
+        sceneryPlants.forEach(p => {
+            if (p.distant) return;
+            const bank = p.bank == null ? null : sceneryRocks[p.bank];
+            p.floor = bank ? bank.pos[1] + bank.radius[1] * 0.55 : height(p.x, p.z);
+        });
         for (const plant of allPlants) plantGeometry(g, plant, plant.floor ?? floor, theme, random);
         const rakeContours = [];
         if (theme.id === 'zen') for (let i = 0; i < 12; i++) {
@@ -671,7 +832,8 @@ const ZQRenderer = (() => {
             const tint = mix(sand, rock, shade).map(n => Math.round(n * 255));
             terrainFaces.push({ points, pos: [x + 0.4, (points[0][1] + points[2][1]) / 2, z + 0.4], tint: `rgb(${tint.join(',')})` });
         }
-        return { geometry: g, rocks, plants, sceneryRocks, sceneryPlants, rockContours, sandContours, rakeContours, habitat, terrainFaces };
+        return { geometry: g, rocks, plants, sceneryRocks, sceneryPlants, rockContours, sandContours, rakeContours,
+            habitat, terrainFaces, surroundRadius };
     }
 
     const VERTEX = `
@@ -897,6 +1059,7 @@ const ZQRenderer = (() => {
                 lit = mix(pigment, ink, min(0.94, edge * 0.86 + hatch * 0.32 + crosshatch * 0.22 + stipple * 0.2));
                 if (v_part > 4.5 && v_part < 5.5) lit = mix(paper, base, 0.85) * (0.55 + diffuse * 0.5 + caustic * 0.03);
                 if (v_part > 1.5 && v_part < 3.5) lit = base;
+                if (v_part > 11.5 && v_part < 12.5) lit = mix(lit, u_water, 0.42);
             }
             float distanceToEye = length(v_world - u_camera);
             float clearWater = u_style > 2.5 ? 0.009 : 0.025;
@@ -1166,11 +1329,8 @@ const ZQRenderer = (() => {
             const range = [[-b.width, b.width], [b.floor + 0.6, b.surface - 0.45], [-b.depth, b.depth]];
             c.target = c.target.map((v, i) => ZQ.clamp(v + (target[i] - v) * blend, ...range[i]));
             const aspect = this.width / this.height;
-            const halfHeight = (b.surface - b.floor) * 0.5;
             // Fill one screen dimension with active water; portrait crops the sides, wide screens crop vertically.
-            const fit = Math.min((b.width + 0.2) / (Math.tan(PARAMS.fov / 2) * aspect),
-                (halfHeight + 0.2) / Math.tan(PARAMS.fov / 2)) + b.depth * 0.35;
-            const distance = ZQ.clamp(fit * c.zoom * (followed ? 0.62 : 1), limits.minDistance, limits.maxDistance);
+            const distance = cameraDistance(b, aspect, c.zoom, Boolean(followed));
             this.eye = [Math.sin(c.yaw) * Math.cos(c.pitch) * distance + c.target[0],
                 Math.max(b.floor + limits.floorClearance, Math.sin(c.pitch) * distance + c.target[1]),
                 Math.cos(c.yaw) * Math.cos(c.pitch) * distance + c.target[2]];
@@ -1543,7 +1703,8 @@ const ZQRenderer = (() => {
                 ctx.restore();
             }
             const decorations = [...(this.decor.terrainFaces || []).map(face => ({ kind: 'terrain', pos: face.pos, item: face })),
-                ...[...this.decor.rocks, ...this.decor.sceneryRocks].map((r, i) => ({ kind: 'rock', pos: r.pos, item: r, contour: this.decor.rockContours?.[i] })),
+                ...[...this.decor.rocks, ...this.decor.sceneryRocks].map((r, i) => ({ kind: 'rock', pos: r.pos, item: r,
+                    scenery: i >= this.decor.rocks.length, contour: this.decor.rockContours?.[i] })),
                 ...[...this.decor.plants, ...this.decor.sceneryPlants].map(p => ({ kind: 'plant', pos: [p.x, p.floor ?? state.bounds.floor, p.z], item: p }))];
             decorations.sort((a, b) => this.project(b.pos).depth - this.project(a.pos).depth);
             for (const item of decorations) {
@@ -1556,33 +1717,56 @@ const ZQRenderer = (() => {
                     });
                     ctx.closePath(); ctx.fill();
                 } else if (item.kind === 'rock') {
-                    const wash = ctx.createLinearGradient(p.x, p.y - item.item.radius[1] * p.scale, p.x, p.y + item.item.radius[1] * p.scale);
-                    wash.addColorStop(0, theme.id === 'ink' ? '#a1aeb4' : theme.rock);
-                    wash.addColorStop(1, theme.id === 'ink' ? '#394956' : theme.sand);
+                    if (item.item.distant) {
+                        const root = this.project([item.pos[0], groundHeight(theme, state.bounds,
+                            item.pos[0], item.pos[2], this.decor.habitat), item.pos[2]]);
+                        ctx.save(); ctx.beginPath(); ctx.rect(0, 0, w, ZQ.clamp(root.y, 0, h)); ctx.clip();
+                    }
+                    let radius = item.item.radius;
+                    if (item.item.distant || theme.id === 'tropical' && item.scenery) {
+                        const yaw = this.camera.yaw, pitch = this.camera.pitch ?? 0;
+                        const across = Math.hypot(radius[0] * Math.cos(yaw), radius[2] * Math.sin(yaw));
+                        const along = Math.hypot(radius[0] * Math.sin(yaw), radius[2] * Math.cos(yaw));
+                        radius = [across, Math.hypot(radius[1] * Math.cos(pitch), along * Math.sin(pitch)), radius[2]];
+                    }
+                    const wash = ctx.createLinearGradient(p.x, p.y - radius[1] * p.scale, p.x, p.y + radius[1] * p.scale);
+                    if (item.item.distant) {
+                        const pigment = color(item.item.tint);
+                        const tint = amount => `rgb(${mix(pigment, color(theme.water), amount).map(n => Math.round(n * 255)).join(',')})`;
+                        wash.addColorStop(0, tint(0.35)); wash.addColorStop(1, tint(0.65));
+                    } else {
+                        wash.addColorStop(0, theme.id === 'ink' ? '#a1aeb4' : item.item.tint || theme.rock);
+                        wash.addColorStop(1, theme.id === 'ink' ? '#394956' : theme.sand);
+                    }
                     ctx.fillStyle = wash;
                     ctx.beginPath();
                     if (item.contour) {
                         const contour = item.contour;
                         const last = contour[contour.length - 1], first = contour[0];
-                        ctx.moveTo(p.x + (last[0] + first[0]) * item.item.radius[0] * p.scale / 2,
-                            p.y + (last[1] + first[1]) * item.item.radius[1] * p.scale / 2);
+                        ctx.moveTo(p.x + (last[0] + first[0]) * radius[0] * p.scale / 2,
+                            p.y + (last[1] + first[1]) * radius[1] * p.scale / 2);
                         contour.forEach(([x, y], i) => {
                             const next = contour[(i + 1) % contour.length];
-                            ctx.quadraticCurveTo(p.x + x * item.item.radius[0] * p.scale, p.y + y * item.item.radius[1] * p.scale,
-                                p.x + (x + next[0]) * item.item.radius[0] * p.scale / 2,
-                                p.y + (y + next[1]) * item.item.radius[1] * p.scale / 2);
+                            ctx.quadraticCurveTo(p.x + x * radius[0] * p.scale, p.y + y * radius[1] * p.scale,
+                                p.x + (x + next[0]) * radius[0] * p.scale / 2,
+                                p.y + (y + next[1]) * radius[1] * p.scale / 2);
                         });
                         ctx.closePath();
-                    } else ctx.ellipse(p.x, p.y, item.item.radius[0] * p.scale, item.item.radius[1] * p.scale, 0.1, 0, Math.PI * 2);
+                    } else ctx.ellipse(p.x, p.y, radius[0] * p.scale, radius[1] * p.scale, 0.1, 0, Math.PI * 2);
                     ctx.fill();
+                    if (item.item.luminous) {
+                        ctx.save(); ctx.globalAlpha = 0.55; ctx.fillStyle = item.item.tint;
+                        ctx.shadowColor = item.item.tint; ctx.shadowBlur = 6; ctx.fill(); ctx.restore();
+                    }
                     if (theme.id === 'ink') {
-                        ctx.strokeStyle = '#293742'; ctx.lineWidth = 1.4; ctx.stroke();
+                        ctx.strokeStyle = item.item.distant ? '#687184' : '#293742';
+                        ctx.lineWidth = item.item.distant ? 0.8 : 1.4; ctx.stroke();
                         ctx.save(); ctx.clip(); ctx.globalAlpha = 0.35;
                         for (let j = -8; j < 9; j++) {
                             ctx.beginPath(); ctx.moveTo(p.x + j * 6, p.y);
                             ctx.lineTo(p.x + j * 6 - 20, p.y + item.item.radius[1] * p.scale); ctx.stroke();
                         }
-                        ctx.fillStyle = '#293742';
+                        ctx.fillStyle = item.item.distant ? '#687184' : '#293742';
                         for (let j = 0; j < 24; j++) {
                             ctx.beginPath();
                             ctx.arc(p.x + Math.sin(j * 2.4) * item.item.radius[0] * p.scale * 0.9,
@@ -1595,8 +1779,11 @@ const ZQRenderer = (() => {
                         ctx.ellipse(p.x, p.y - item.item.radius[1] * p.scale * 0.78,
                             item.item.radius[0] * p.scale * 0.6, item.item.radius[1] * p.scale * 0.18, 0, 0, Math.PI * 2); ctx.fill();
                     }
+                    if (item.item.distant) ctx.restore();
                 } else {
+                    if (item.item.distant) { ctx.save(); ctx.globalAlpha = 0.5; }
                     drawPlant2D(ctx, item.item, p, theme, time, this.reduced);
+                    if (item.item.distant) ctx.restore();
                 }
             }
             const entities = state.fish.map(f => ({ pos: f.pos, fish: f }));
@@ -1878,5 +2065,5 @@ const ZQRenderer = (() => {
             this.canvas.remove();
         }
     }
-    return { Renderer, PARAMS, color, multiply, perspective, lookAt, transform, inverse, prizeGeometry, creatureGeometry, fishGeometry, fishPreview, prizeOpening, plantGeometry, drawPlant2D, Geometry, groundHeight, plantProfile };
+    return { Renderer, PARAMS, color, multiply, perspective, lookAt, transform, inverse, prizeGeometry, creatureGeometry, fishGeometry, fishPreview, prizeOpening, plantGeometry, drawPlant2D, Geometry, groundHeight, plantProfile, cameraDistance, scenicRadius };
 })();

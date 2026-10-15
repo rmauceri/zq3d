@@ -2146,7 +2146,9 @@
             const limit = { battery: 85000, balanced: 105000, high: 125000 }[level];
             assert(r.sceneMesh.count < limit, `${theme.id} ${level}: scenery exceeds ${limit} vertices`);
             const budget = Math.max(ZQRenderer.PARAMS.quality[level].plants, theme.id === 'ink' ? 28 : 0);
-            equal(r.decor.plants.length + r.decor.sceneryPlants.length, budget);
+            equal(r.decor.plants.length + r.decor.sceneryPlants.filter(p => !p.distant).length, budget);
+            equal(r.decor.sceneryPlants.filter(p => p.distant).length,
+                { tropical: 18, koi: 30, deep: 6, zen: 16, ink: 36 }[theme.id]);
             if (theme.id === 'zen' || theme.id === 'ink') {
                 const interior = r.decor.sceneryPlants.filter(p => Math.abs(p.x) < bounds.width && Math.abs(p.z) < bounds.depth);
                 assert(interior.length >= 8, `${theme.id} ${level}: fuller planting disappears at lower quality`);
@@ -2160,6 +2162,234 @@
                 rock.parts ? rock.parts.map(part => ({ ...part, moss: rock.moss })) : [rock]));
             assert(r.decor.rockContours.every(points => points.length === 20));
             assert(r.decor.sandContours.length === 12);
+        }
+    });
+    test('Tropical Reef containment respects saved bounds, quality budgets, and the unchanged habitat', () => {
+        if (typeof ZQRenderer === 'undefined') return;
+        for (const bounds of [core.boundsFor(), { ...core.boundsFor(), width: 3.8, depth: 1.8 }]) {
+            let primary;
+            for (const level of ['battery', 'balanced', 'high']) {
+                const r = Object.create(ZQRenderer.Renderer.prototype);
+                Object.assign(r, { width: 1200, height: 800, level, gl: {}, releaseMesh() {},
+                    mesh: geometry => ({ count: geometry.vertices.length / 10 }) });
+                r.setTheme(core.THEMES.tropical, bounds);
+                assert(r.sceneMesh.count < { battery: 85000, balanced: 105000, high: 125000 }[level]);
+                equal(r.decor.habitat, core.createHabitat('tropical', bounds));
+                equal(r.decor.plants.length + r.decor.sceneryPlants.filter(p => !p.distant).length,
+                    ZQRenderer.PARAMS.quality[level].plants);
+                const shoulders = r.decor.sceneryRocks.slice(0, 7);
+                equal(shoulders.length, 7);
+                if (primary) equal(shoulders, primary);
+                else primary = shoulders;
+                assert(shoulders.slice(0, 2).every(rock => rock.pos[2] < -bounds.depth));
+                assert(shoulders.slice(5).every(rock => rock.pos[2] > bounds.depth));
+                assert(shoulders[0].radius[0] !== shoulders[1].radius[0], 'Reef shoulders became a symmetrical fence');
+                for (const rock of r.decor.sceneryRocks.filter(rock => !rock.distant)) {
+                    assert(Math.abs(rock.pos[0]) - rock.radius[0] * 1.12 >= bounds.width + 0.159
+                        || Math.abs(rock.pos[2]) - rock.radius[2] * 1.12 >= bounds.depth + 0.159,
+                    'A cosmetic rock or its contact shadow intrudes into the playable habitat');
+                }
+                const surround = r.decor.sceneryRocks.filter(rock => rock.distant);
+                equal(surround.length, 18 * ({ battery: 2, balanced: 3, high: 4 }[level]));
+                assert(r.decor.surroundRadius > bounds.width);
+                for (const rock of surround) assert(Math.hypot(rock.pos[0], rock.pos[2])
+                    - Math.hypot(rock.radius[0], rock.radius[2]) > r.decor.surroundRadius,
+                'A distant reef formation enters the camera envelope');
+                for (const rock of shoulders.slice(3)) {
+                    const floor = ZQRenderer.groundHeight(core.THEMES.tropical, bounds, rock.pos[0], rock.pos[2], r.decor.habitat);
+                    assert(rock.pos[1] + rock.radius[1] - floor < 0.35, 'A side or foreground bank became too tall');
+                }
+                assert(r.decor.sceneryPlants.filter(p => p.bank != null).every(p =>
+                    p.floor > core.terrainHeight(r.decor.habitat.terrain, p.x, p.z)),
+                'Reef-shoulder corals lost their raised attachment');
+                for (const plant of r.decor.sceneryPlants) {
+                    const reach = plant.h * 0.45 + 0.15;
+                    assert(Math.abs(plant.x) - reach > bounds.width || Math.abs(plant.z) - reach > bounds.depth,
+                        'A coral crown intrudes into the playable habitat');
+                    if (plant.distant) assert(Math.hypot(plant.x, plant.z) - reach * Math.SQRT2
+                        > r.decor.surroundRadius, 'A distant coral enters the camera envelope');
+                    const geometry = new ZQRenderer.Geometry();
+                    ZQRenderer.plantGeometry(geometry, plant, plant.floor, core.THEMES.tropical, () => 0.5);
+                    for (let i = 0; i < geometry.vertices.length; i += 10) {
+                        const part = geometry.vertices[i + 9];
+                        const height = part > 3.5 && part < 4.5 ? (part % 1) * 25 : 0;
+                        assert(Math.abs(geometry.vertices[i]) - height * 0.065 > bounds.width
+                            || Math.abs(geometry.vertices[i + 2]) - height * 0.035 > bounds.depth,
+                        'A coral vertex or its animated sway crosses the swimming boundary');
+                    }
+                }
+                const decor = r.decor, mesh = r.sceneMesh;
+                r.width = 412; r.height = 915;
+                r.setTheme(core.THEMES.tropical, bounds);
+                assert(r.decor === decor && r.sceneMesh === mesh, 'Portrait resize rebuilt the reef perimeter');
+            }
+        }
+    });
+    test('Tropical Reef containment stays fixed through orbit, pitch, zoom, and follow views', () => {
+        if (typeof ZQRenderer === 'undefined') return;
+        const g = make('tropical'), r = Object.create(ZQRenderer.Renderer.prototype);
+        Object.assign(r, { width: 412, height: 915, level: 'balanced', reduced: true,
+            camera: { ...ZQRenderer.PARAMS.camera, zoom: 1, target: [0, 0, 0], follow: null } });
+        r.setTheme(g.theme, g.state.bounds);
+        const decor = r.decor, original = JSON.stringify([decor.sceneryRocks, decor.sceneryPlants]);
+        for (const follow of [null, g.state.fish[0].id]) for (const zoom of [0.62, 1.6])
+            for (const pitch of [0.02, 1.12]) for (let i = 0; i < 16; i++) {
+                Object.assign(r.camera, { yaw: i * Math.PI / 8, pitch, zoom, follow });
+                r.updateCamera(g.state, 0.016);
+                assert(r.eye.every(Number.isFinite) && [...r.vp].every(Number.isFinite));
+                for (const rock of decor.sceneryRocks) {
+                    const p = r.project(rock.pos);
+                    assert([p.x, p.y, p.scale, p.depth].every(Number.isFinite));
+                }
+                assert(r.decor === decor);
+                equal(JSON.stringify([decor.sceneryRocks, decor.sceneryPlants]), original);
+            }
+    });
+    test('Every themed scenic surround encloses camera positions without restricting camera controls', () => {
+        if (typeof ZQRenderer === 'undefined') return;
+        for (const theme of Object.keys(core.THEMES))
+            for (const bounds of [core.boundsFor(), { ...core.boundsFor(), width: 3.8, depth: 1.8 }]) {
+            const g = make(theme), r = Object.create(ZQRenderer.Renderer.prototype);
+            g.state.bounds = bounds;
+            Object.assign(r, { width: 412, height: 915, level: 'battery', reduced: true,
+                camera: { ...ZQRenderer.PARAMS.camera, target: [0, 0, 0], follow: null } });
+            r.setTheme(g.theme, bounds);
+            const radius = r.decor.surroundRadius;
+            for (const [width, height] of [[320, 960], [1920, 800], [960, 320]]) {
+                r.width = width; r.height = height;
+                for (const zoom of [0.62, 1, 1.6]) for (const pitch of [0.02, 0.14, 1.12])
+                    for (const follow of [null, g.state.fish[0].id]) for (const side of [-1, 1])
+                        for (let i = 0; i < 24; i++) {
+                            const target = [bounds.width * side, bounds.surface - 0.45, bounds.depth * side];
+                            g.state.fish[0].pos = [...target];
+                            Object.assign(r.camera, { yaw: i * Math.PI / 12, pitch, zoom, follow, target });
+                            r.updateCamera(g.state, 1);
+                            assert(Math.hypot(r.eye[0], r.eye[2]) < radius - 1,
+                                'A camera position escaped the scenic surround');
+                            near(r.camera.yaw, i * Math.PI / 12);
+                            near(r.camera.pitch, pitch); near(r.camera.zoom, zoom);
+                            assert(r.decor.sceneryRocks.filter(rock => rock.distant)
+                                .every(rock => core.rockDistance(r.eye, rock, 0) > 1),
+                            'The camera entered a distant reef outcrop');
+                        }
+            }
+        }
+    });
+    test('Themed surrounds retain distinct compositions, bounds clearance, and deterministic quality silhouettes', () => {
+        if (typeof ZQRenderer === 'undefined') return;
+        const compositions = [];
+        for (const theme of ['koi', 'deep', 'zen', 'ink']) {
+            for (const bounds of [core.boundsFor(), { ...core.boundsFor(), width: 3.8, depth: 1.8 }]) {
+                let silhouette, planting;
+                for (const level of ['battery', 'balanced', 'high']) {
+                    const r = Object.create(ZQRenderer.Renderer.prototype);
+                    Object.assign(r, { width: 1200, height: 800, level, gl: {}, releaseMesh() {},
+                        mesh: geometry => {
+                            assert(geometry.vertices.every(Number.isFinite));
+                            return { count: geometry.vertices.length / 10 };
+                        } });
+                    r.setTheme(core.THEMES[theme], bounds);
+                    assert(r.sceneMesh.count < { battery: 85000, balanced: 105000, high: 125000 }[level]);
+                    equal(r.decor.habitat, core.createHabitat(theme, bounds));
+                    const rocks = r.decor.sceneryRocks.filter(rock => rock.distant);
+                    const main = rocks.filter(rock => rock.silhouette);
+                    equal(main.length, { koi: 15, deep: 11, zen: 12, ink: 14 }[theme]);
+                    if (silhouette) equal(main, silhouette);
+                    else silhouette = main;
+                    for (const rock of rocks) assert(Math.hypot(rock.pos[0], rock.pos[2])
+                        - Math.hypot(rock.radius[0], rock.radius[2]) > r.decor.surroundRadius,
+                    `${theme}: rock intrudes into the camera envelope`);
+                    const plants = r.decor.sceneryPlants.filter(p => p.distant);
+                    if (planting) equal(plants, planting);
+                    else planting = plants;
+                    const forms = [...new Set(plants.map(p => p.form))].sort();
+                    equal(forms, theme === 'deep' ? ['anemone', 'fan', 'spire']
+                        : [theme === 'koi' ? 'reed' : theme === 'zen' ? 'ribbon' : 'ink-leaf']);
+                    for (const plant of plants) {
+                        const mesh = new ZQRenderer.Geometry();
+                        ZQRenderer.plantGeometry(mesh, plant, plant.floor, core.THEMES[theme], () => 0.5);
+                        for (let i = 0; i < mesh.vertices.length; i += 10) {
+                            const part = mesh.vertices[i + 9];
+                            const localHeight = (part > 3.5 && part < 4.5 || part > 10.5 && part < 11.5) ? (part % 1) * 25 : 0;
+                            assert(Math.hypot(mesh.vertices[i], mesh.vertices[i + 2])
+                                - Math.hypot(localHeight * 0.065, localHeight * 0.035) > r.decor.surroundRadius,
+                            `${theme}: plant or sway intrudes into the camera envelope`);
+                        }
+                    }
+                    if (theme === 'deep') {
+                        equal(rocks.filter(rock => rock.luminous).length, 4);
+                        assert(rocks.some(rock => rock.spire));
+                    } else assert(rocks.every(rock => !rock.luminous), 'Deep mineral glow leaked into another world');
+                    const decor = r.decor;
+                    r.width = 412; r.height = 915; r.setTheme(core.THEMES[theme], bounds);
+                    assert(r.decor === decor, `${theme}: resize rebuilt the surround`);
+                }
+                compositions.push(JSON.stringify(silhouette.map(rock => [rock.pos, rock.radius])));
+            }
+        }
+        equal(new Set(compositions).size, compositions.length);
+    });
+    test('Themed surrounds vary stone sizes and gaps with fuller clustered planting and repeatable rebuilds', () => {
+        if (typeof ZQRenderer === 'undefined') return;
+        for (const theme of Object.values(core.THEMES)) {
+            const build = () => {
+                const r = Object.create(ZQRenderer.Renderer.prototype);
+                Object.assign(r, { width: 1200, height: 800, level: 'balanced' });
+                r.setTheme(theme, core.boundsFor());
+                return r.decor;
+            };
+            const decor = build(), rebuilt = build();
+            equal(decor.sceneryRocks, rebuilt.sceneryRocks);
+            equal(decor.sceneryPlants, rebuilt.sceneryPlants);
+            const main = decor.sceneryRocks.filter(rock => rock.silhouette);
+            for (const axis of [0, 1]) {
+                const sizes = main.map(rock => rock.radius[axis]);
+                assert(Math.max(...sizes) / Math.min(...sizes) > 1.5,
+                    `${theme.id}: outer stone sizes are too uniform`);
+            }
+            const angles = main.map(rock =>
+                (Math.atan2(rock.pos[0], rock.pos[2]) + Math.PI * 2) % (Math.PI * 2)).sort((a, b) => a - b);
+            const gaps = angles.map((angle, i) =>
+                (angles[(i + 1) % angles.length] - angle + Math.PI * 2) % (Math.PI * 2));
+            assert(Math.max(...gaps) / Math.min(...gaps) > 1.5, `${theme.id}: outer gaps are too uniform`);
+            assert(Math.max(...gaps) < Math.PI * 2 / main.length * 1.6,
+                `${theme.id}: variation left an excessive break in the surround`);
+            const plants = decor.sceneryPlants.filter(plant => plant.distant);
+            if (theme.id === 'tropical') equal([...new Set(plants.map(plant => plant.form))].sort(), ['branch', 'fan']);
+            const clumps = theme.id === 'koi' || theme.id === 'ink' ? 3 : 2;
+            for (let i = 0; i < plants.length; i += clumps) {
+                const first = plants[i], last = plants[i + clumps - 1];
+                assert(Math.hypot(first.x - last.x, first.z - last.z) > 1.5,
+                    `${theme.id}: planting is stacked at one point instead of spread around the stones`);
+            }
+            if (theme.id === 'koi') assert(plants.every(plant => plant.spread === 2));
+        }
+    });
+    test('Tropical Reef Canvas containment silhouettes reflect world-space bank orientation', () => {
+        if (typeof ZQRenderer === 'undefined') return;
+        const calls = [];
+        const ctx = new Proxy({}, {
+            get: (target, key) => key in target ? target[key] : key.includes('Gradient')
+                ? () => ({ addColorStop() {} }) : (...args) => calls.push([key, ...args]),
+            set: (target, key, value) => { target[key] = value; return true; }
+        });
+        const g = make('tropical'), r = Object.create(ZQRenderer.Renderer.prototype);
+        g.state.fish = [];
+        Object.assign(r, { ctx, width: 1200, height: 800, ratio: 1, theme: g.theme, reduced: true,
+            camera: { yaw: 0, pitch: 0 }, prizes: [], particleData: () => [],
+            floorPolygon: () => [{ x: 0, y: 400 }, { x: 1200, y: 400 }, { x: 1200, y: 800 }],
+            project: () => ({ x: 600, y: 480, scale: 40, visible: true, depth: 10 }),
+            decor: { rocks: [], plants: [], sceneryPlants: [],
+                sceneryRocks: [{ pos: [0, -2, -4], radius: [2, 0.2, 0.5] }] } });
+        for (const [yaw, pitch, width, height] of [
+            [0, 0, 80, 8], [Math.PI / 2, 0, 20, 8],
+            [0, Math.PI / 2, 80, 20], [Math.PI / 2, Math.PI / 2, 20, 80]
+        ]) {
+            calls.length = 0; Object.assign(r.camera, { yaw, pitch });
+            r.draw2D(g.state, 0);
+            const bank = calls.find(call => call[0] === 'ellipse' && call[5] === 0.1);
+            assert(bank, 'Canvas dropped the cosmetic reef bank');
+            near(bank[3], width); near(bank[4], height);
         }
     });
     test('Real sand hills rise in every world and share their heightfield with navigation and scenery', () => {

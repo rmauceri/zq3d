@@ -132,6 +132,19 @@ try:
                         check(b.width>0 && b.height>0 && b.left>=footer.left && b.right<=footer.right &&
                               b.top>=footer.top && b.bottom<=footer.bottom, 'Bottom rail content is hidden or overflowing: '+selector);
                     }
+                    const progress=document.getElementById('progress-button');
+                    check(progress.matches('button.lifetime-stats') &&
+                          progress.contains(document.getElementById('best-score')) &&
+                          progress.contains(document.getElementById('achievement-count')) &&
+                          !progress.querySelector('button,a,.icon') && rect('#progress-button').height>=44,
+                          'Footer statistics are not one accessible progress target');
+                    const stats=[...progress.children].map(node=>node.getBoundingClientRect());
+                    const progressStyle=getComputedStyle(progress);
+                    const expectedWidth=stats.reduce((sum,stat)=>sum+stat.width,0)+parseFloat(progressStyle.columnGap)
+                        +parseFloat(progressStyle.paddingLeft)+parseFloat(progressStyle.paddingRight)
+                        +parseFloat(progressStyle.borderLeftWidth)+parseFloat(progressStyle.borderRightWidth);
+                    check(Math.abs(rect('#progress-button').width-expectedWidth)<=2,
+                          'Progress target stretches beyond the statistics text group');
                     check(!overlap(rect('.lifetime-stats'),rect('#resume-button')), 'Bottom rail commands overlap');
                     check(!document.querySelector('.welcome-footer .original-link'), 'Original-game link remains in the footer');
                     check(!document.getElementById('resume-note'), 'Removed away message remains');

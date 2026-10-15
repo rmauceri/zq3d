@@ -95,13 +95,11 @@ body[data-screen="welcome"] #aquarium { position: absolute; inset: 0; }
 }
 .resume-card { justify-self: end; min-width: 0; }
 .resume-card > button { font-weight: 500; }
-.lifetime-stats { min-width: 0; display: flex; align-items: center; gap: 24px; }
-.lifetime-stats > div { display: grid; gap: 2px; }
+.lifetime-stats { min-width: 0; width: fit-content; justify-self: start; display: flex; align-items: center; gap: 24px; padding: 4px 0; text-align: left; }
+.lifetime-stats > span { display: grid; gap: 2px; }
 .lifetime-stats strong { font-size: 18px; font-weight: 400; font-variant-numeric: tabular-nums; }
 .lifetime-stats small { font-size: 13px; color: var(--cp-text-soft); }
-.lifetime-stats > div > span { font-size: 9px; color: var(--cp-text-soft); letter-spacing: 0.6px; }
-.progress-link { color: var(--cp-link); font-size: 12px; padding-inline: 8px; }
-.progress-link .icon { width: 14px; height: 14px; flex-basis: 14px; }
+.lifetime-stats > span > span { font-size: 9px; color: var(--cp-text-soft); letter-spacing: 0.6px; }
 .original-link { display: inline-flex; align-items: center; gap: 6px; color: var(--cp-link); font-size: 13px; line-height: 1.5; text-underline-offset: 3px; min-height: 44px; }
 .original-link:hover { color: var(--cp-accent-hover); }
 .world-picker { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; }
@@ -432,8 +430,7 @@ body.has-care-alert .tray { --tray-bottom: max(var(--tray-rest-bottom), calc(var
     .lifetime-stats { gap: 8px; }
     .lifetime-stats strong { font-size: 16px; }
     .lifetime-stats small { font-size: 11px; }
-    .lifetime-stats > div > span { font-size: 8px; letter-spacing: 0; }
-    .progress-link { gap: 4px; padding-inline: 4px; font-size: 11px; }
+    .lifetime-stats > span > span { font-size: 8px; letter-spacing: 0; }
     .resume-card > button { max-width: 140px; padding: 6px 8px; font-size: 12px; }
     .theme-options { gap: 4px; }
     .theme-option strong { font-size: 0.6875rem; }
@@ -442,7 +439,7 @@ body.has-care-alert .tray { --tray-bottom: max(var(--tray-rest-bottom), calc(var
 @media (max-width: 479px) {
     .brand { font-size: 18px; gap: 6px; letter-spacing: -0.4px; }
     .welcome-footer { gap: 4px 12px; }
-    .lifetime-stats { grid-column: 1 / -1; justify-content: space-between; }
+    .lifetime-stats { grid-column: 1 / -1; }
     .resume-card { grid-column: 1 / -1; grid-row: 2; }
     .world-picker { grid-template-columns: minmax(0, 1fr); }
     .theme-options { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }

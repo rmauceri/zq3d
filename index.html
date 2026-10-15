@@ -157,11 +157,10 @@
         </div>
 
         <footer class="welcome-footer" aria-label="Your progress and saved aquarium">
-            <div class="lifetime-stats">
-                <div><strong id="best-score">0</strong><span>PERSONAL BEST</span></div>
-                <div><strong id="achievement-count">0 <small>/ 20</small></strong><span>DISCOVERIES</span></div>
-                <button class="quiet-button progress-link" id="progress-button" aria-label="View lifetime progress">Progress <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
-            </div>
+            <button class="lifetime-stats" id="progress-button" type="button" aria-label="View your progress" aria-controls="tray">
+                <span><strong id="best-score">0</strong><span>PERSONAL BEST</span></span>
+                <span><strong id="achievement-count">0 <small>/ 20</small></strong><span>DISCOVERIES</span></span>
+            </button>
             <div class="resume-card" id="resume-card" hidden>
                 <button class="secondary-button" id="resume-button" hidden>Resume last session</button>
             </div>

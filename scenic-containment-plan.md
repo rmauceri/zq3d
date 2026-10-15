@@ -1,9 +1,91 @@
 # Zenquarium 3D: Scenic Containment Plan
 
-**Status:** Proposed; scenery implementation has not started.
+**Status:** All five theme treatments user-approved; requested stone variation
+and fuller outer planting are implemented and ready for visual review.
 **Scope:** Theme-specific visual enclosure without changing the playable habitat.
-**Recommendation:** Prototype Tropical Reef first, review the result, then adapt
-the approach to the other four worlds.
+**Approach:** Preserve the approved two-layer composition, with distinct forms,
+palettes, planting, and negative space for each world.
+
+## Current implementation
+
+The first low-only prototype was rejected by the user because it made no
+meaningful visible difference. A stronger near-boundary rear composition was
+also unsuitable during reverse orbit. The user then explicitly approved
+**low habitat edges plus a taller scenic surround beyond the camera's entire
+movement range**, rather than a cutaway or reduced camera freedom.
+
+The revised renderer places seven low shoulders just outside the supplied
+swimming bounds. Beyond those, eighteen broad, irregularly spaced reef outcrops
+with quality-scaled coral shelves and eighteen fan/branch corals interrupt the
+distant horizon in every direction. These are distant landscape, not additional
+playable habitat. Higher-quality detail does not change the main skyline.
+
+The user approved this result and requested the same approach for all themes.
+Each extension uses existing near-habitat scenery and a distinct distant surround:
+
+| World | Implemented distant composition |
+|---|---|
+| Koi Pond | Fifteen rounded banks with moss caps, quality-scaled companion stones, and thirty wider reed clumps. |
+| Deep Ocean | Eleven dark formations, four mineral spires with luminous tips, and six fan/spire/anemone accents in three widely separated pairs. |
+| Zen Garden | Twelve lower stone banks with generous gaps, sparse moss and upright accents, and sixteen ribbon clumps. |
+| Pen & Ink | Fourteen staggered banks, overlapping secondary silhouettes, and thirty-six botanical accents; distant rocks mix toward lavender water and use quieter Canvas outlines. |
+
+The user accepted all five compositions and requested more varied stones/gaps
+and more plant life around the outer formations. Seeded, normalized angular
+intervals now vary between sites; independent width, depth, and height variation
+mixes smaller stones with broad formations. The same seeds reproduce each
+layout on rebuild, with no moving or randomly reshuffling background.
+Planting spreads tangentially across the formations in pairs or threes, with
+varied heights and attachment levels. Koi reeds have wider clumps; Tropical
+Reef mixes fans with coarsely modeled branching coral; Deep Ocean's distant
+luminous plant tips remain readable at their greater distance. Deep Ocean and
+Zen Garden retain quieter, unplanted intervals rather than a continuous hedge.
+Near-habitat scenery is unchanged.
+
+The surround's inner clearance is derived from the same distance calculation
+used by the camera, its maximum zoom, and the full target range. Complete rock
+footprints and coral crowns remain beyond that envelope, including a near-plane
+margin. Geometry stays fixed in world space and is generated only when the
+existing environment cache rebuilds. No cutaway, transparency, camera-attached
+geometry, changed camera limits, outer-seabed fade, or increased fog is used.
+
+Start and gameplay share the same scenery. Canvas uses the same cached data,
+projects bank dimensions for yaw/pitch, mutes distant colors, and clips buried
+distant formations at their ground line. Simulation habitat, navigation,
+terrain, saving, and scoring are unchanged.
+
+Focused checks cover original and narrower saved bounds, unchanged physical
+habitat, finite geometry and existing vertex ceilings, distant plant crown/sway
+clearance, cache reuse, and Canvas orientation. Camera coverage additionally
+sweeps full orbits, aspect ratios, zoom/pitch limits, and corner follow targets
+to verify that the camera stays inside the surround without changing controls.
+All fifteen selected scenery/camera regression checks passed. Coverage includes
+all themes, deterministic quality-independent main silhouettes, distinct planting,
+Deep-only luminous minerals, and resize/cache reuse. Additional assertions check
+more than 1.5:1 variation in both stone widths/heights and angular gaps, cap
+the largest angular interval, check spread-out clump roots, and compare fresh
+rebuilds for determinism.
+
+Authorized browser checks compared the repository baseline and revised renderer
+with identical seeded fish, camera, time, and viewports. Desktop and portrait
+images were inspected side by side. Additional views cover battery landscape,
+reverse high quality, elevated, and close rear-follow views in WebGL and Canvas.
+Bounded local-file application checks also cover actual Start and gameplay in
+desktop, portrait, and landscape for the approved reef and all four extensions.
+No page/WebGL errors were observed.
+Browsers were closed; no servers or dependency installations were needed.
+
+Representative Tropical Reef scenery counts are approximately 77,700 vertices in
+battery, 95,600 balanced, and 113,700 high, below the unchanged 85,000/105,000/
+125,000 ceilings. All four extensions also remain below those unchanged limits
+at every quality and with both current and narrower saved bounds.
+This is more geometry than the original layout; batching does
+not imply zero rendering cost. Frame-time and power comparisons on mobile
+devices have not been measured. The full responsive suite was not run.
+
+The user's visual review remains the acceptance gate for the latest variation
+and planting refinements. Commits and publication have not
+been requested and still require approval.
 
 ## Goal and rationale
 
@@ -54,6 +136,11 @@ The scenery should suggest the actual habitat's edge. A backdrop far beyond the
 swimming bounds could leave the same visual mismatch even if it looks fuller.
 This is not intended to explain every invisible front, surface, or side limit
 with a literal barrier.
+
+**Approved revision:** the tall surround now represents distant landscape beyond
+the camera range, with a separate low edge near the fish. This deliberately
+supersedes the original preference for keeping all enclosure near the bounds,
+to avoid foreground blockers without cutaways or camera restrictions.
 
 | World | Proposed treatment | What to preserve |
 |---|---|---|
@@ -121,8 +208,8 @@ No save migration, new setting, or persistent scenery data should be needed.
 
 ### 1. Confirm the prototype boundary
 
-- [ ] Agree to a Tropical Reef-only, renderer-focused prototype.
-- [ ] Use the low, asymmetric perimeter approach first; leave the other themes
+- [x] Agree to a Tropical Reef-only, renderer-focused prototype.
+- [x] Use the low, asymmetric perimeter approach first; leave the other themes
   unchanged while evaluating the shared technique.
 - [ ] Confirm any proposed camera-visibility mechanism separately if geometry
   placement cannot preserve the current orbit and follow experience.
@@ -132,24 +219,24 @@ obstacles or reduced camera freedom.
 
 ### 2. Build the Tropical Reef prototype
 
-- [ ] Recompose existing decorative rocks and corals into reef shoulders and
+- [x] Recompose existing decorative rocks and corals into reef shoulders and
   layered silhouettes near the habitat edge.
-- [ ] Preserve the central channel, clear prize sand, and visible visitor entry
+- [x] Preserve the central channel, clear prize sand, and visible visitor entry
   areas; avoid a uniform fence or a symmetrical box.
-- [ ] Keep geometry deterministic and cached, with quality-scaled detail.
-- [ ] Implement the corresponding Canvas 2D composition.
-- [ ] Apply the same scene to the Start preview and gameplay.
+- [x] Keep geometry deterministic and cached, with quality-scaled detail.
+- [x] Implement the corresponding Canvas 2D composition.
+- [x] Apply the same scene to the Start preview and gameplay.
 
 **Exit condition:** One complete theme treatment, not five partially tuned ones.
 
 ### 3. Review composition before expanding scope
 
-- [ ] Have the user review phone portrait and landscape, then a wider viewport.
-- [ ] Review default, full-orbit, elevated, low-angle, zoomed, and fish-follow
+- [x] Have the user review the Tropical Reef prototype and approve expansion.
+- [x] Review default, full-orbit, elevated, low-angle, zoomed, and fish-follow
   views, including looking back toward the original foreground.
-- [ ] Check fish, visitors, food, and prizes against the new silhouettes.
-- [ ] Compare battery, balanced, and high quality, plus Canvas 2D.
-- [ ] Keep, revise, or reject the approach based on containment, visibility,
+- [x] Check fish, visitors, food, and prizes against the new silhouettes.
+- [x] Compare battery, balanced, and high quality, plus Canvas 2D.
+- [x] Keep, revise, or reject the approach based on containment, visibility,
   calmness, and the approved performance evidence.
 
 **Exit condition:** User approval of the prototype before rolling the technique
@@ -157,24 +244,26 @@ out to all worlds. If it feels cramped, simplify rather than add more detail.
 
 ### 4. Adapt the approved approach to the other worlds
 
-- [ ] Give each theme its own composition from the visual-direction table.
-- [ ] Preserve especially generous negative space in Deep Ocean and Zen Garden.
-- [ ] Keep Pen & Ink's lavender water and layered illustration identity.
-- [ ] Repeat the camera and small-screen review for each theme rather than
+- [x] Give each theme its own composition from the visual-direction table.
+- [x] Preserve especially generous negative space in Deep Ocean and Zen Garden.
+- [x] Keep Pen & Ink's lavender water and layered illustration identity.
+- [x] Repeat the camera and small-screen review for each theme rather than
   assuming the Tropical Reef result generalizes.
+- [x] Obtain user visual acceptance of the four extensions.
+- [ ] Obtain user visual acceptance of the requested variation and planting refinements.
 
 **Exit condition:** Five recognizable worlds with a shared sense of containment,
 not five recolored versions of the same perimeter.
 
 ### 5. Finish documentation and release preparation
 
-- [ ] Update focused renderer/scenery regression source and README descriptions.
-- [ ] Review geometry budgets, deterministic placement, mesh reuse, fallback
+- [x] Update focused renderer/scenery regression source and README descriptions.
+- [x] Review geometry budgets, deterministic placement, mesh reuse, fallback
   data, old saved bounds, and unchanged gameplay habitat.
-- [ ] Run only the checks specifically authorized for the implementation session.
-- [ ] Increment the current `sw.js` shell-cache version when publishing changed
+- [x] Run only the checks specifically authorized for the implementation session.
+- [x] Prepare the `sw.js` shell-cache increment from v45 to v46 for changed
   application assets. This planning document alone needs no cache bump.
-- [ ] Report remaining visual/performance uncertainty accurately before release.
+- [x] Document remaining visual/performance uncertainty accurately before release.
 
 ## Acceptance criteria
 
@@ -225,8 +314,8 @@ The commit introducing this plan also carries the previously pending UX work:
 These changes were source-reviewed. The user manually reviewed earlier UX
 iterations, but the added regression tests have not been run and the latest
 exit/compact-row behavior has not been independently browser-verified.
-`renderer.js` is unchanged at this handoff; the proposed enclosure does not exist
-yet.
+At the original handoff, `renderer.js` was unchanged and the proposed enclosure
+did not exist. The current prototype status above supersedes that scenery status.
 
 Preserve automatic checkpoints, successful-save-only Save & Return, and no
 offline simulation. The handoff uses save schema 10, storage key

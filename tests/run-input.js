@@ -151,6 +151,14 @@ try {
     for (const id of ['best-score', 'achievement-count', 'progress-button', 'resume-button']) {
         assert(footer.contains($(id)), `${id} is not in the bottom rail`);
     }
+    assert.equal($('progress-button').tagName, 'BUTTON');
+    assert.equal($('progress-button').type, 'button');
+    assert($('progress-button').classList.contains('lifetime-stats'));
+    assert.equal($('progress-button').getAttribute('aria-label'), 'View your progress');
+    assert.equal($('progress-button').getAttribute('aria-controls'), 'tray');
+    assert($('progress-button').contains($('best-score')) && $('progress-button').contains($('achievement-count')),
+        'The progress trigger does not contain both footer statistics');
+    assert.equal($('progress-button').querySelector('button, a, .icon'), null, 'The footer retains a separate progress link');
     assert.equal($('resume-note'), null);
     assert.equal(typeof resizeObservers.get(viewport), 'function');
     resizeObservers.get(viewport)();
@@ -181,7 +189,15 @@ try {
     assert.equal(w.document.activeElement, $('about-tagline'), 'About did not begin at its tagline');
     assert.match(evaluate('ZQApp.version'), /^\d+\.\d+\.\d+$/);
     assert.equal($('app-version').textContent, evaluate('ZQApp.version'));
-    assert($('panel-content').textContent.includes('Created with care. No accounts, telemetry, or external services.'));
+    assert($('panel-content').textContent.includes('No account is needed.'));
+    assert($('panel-content').textContent.includes('Your aquarium and progress are saved on this device, not sent to analytics.'));
+    assert($('panel-content').textContent.includes('The hosted site uses Vercel Web Analytics'));
+    assert($('panel-content').textContent.includes('This is telemetry, separate from your saved progress.'));
+    assert(!/No accounts, telemetry, or external services/.test($('panel-content').textContent),
+        'About still claims analytics-free operation');
+    const analyticsPrivacy = $('panel-content').querySelector('a[href="https://vercel.com/docs/analytics/privacy-policy"]');
+    assert(analyticsPrivacy && analyticsPrivacy.target === '_blank' && analyticsPrivacy.relList.contains('noopener'),
+        'About is missing a safe link to the analytics privacy disclosure');
     assert(!/GitHub Pages|IP addresses/.test($('panel-content').textContent), 'About assumes an online hosting provider');
     const originalLink = $('panel-content').querySelector('.original-link');
     assert.equal(originalLink.href, 'https://rmauceri.github.io/zenquarium');
@@ -199,10 +215,12 @@ try {
     assert(!$('panel').open, 'Escape did not dismiss About');
     console.log('PASS Zenquarium 3D branding opens About with version, privacy and original-game link without changing progress');
     $('progress-button').focus();
-    $('progress-button').click();
+    $('best-score').click();
     assert.equal($('tray').dataset.kind, 'progress');
     assert.equal($('tray-title').textContent, 'Your progress.');
-    assert.equal($('progress-button').textContent.trim(), 'Progress');
+    assert.match($('progress-button').textContent, /PERSONAL BEST/);
+    assert.match($('progress-button').textContent, /DISCOVERIES/);
+    assert(!/Progress/.test($('progress-button').textContent), 'The footer retains a visible Progress label');
     assert(!$('progress-welcome').hidden, 'A genuinely new profile has no welcome');
     assert($('progress-records').hidden && $('completed-sessions').hidden, 'A new player sees a wall of zero statistics');
     assert($('earned-discoveries').hidden && !$('remaining-discoveries').open);
@@ -222,6 +240,10 @@ try {
     key('keydown', 'Escape');
     assert($('tray').hidden);
     assert.equal(w.document.activeElement, $('progress-button'), 'Closing progress lost its trigger focus');
+    $('achievement-count').click();
+    assert.equal($('tray').dataset.kind, 'progress', 'The discoveries statistic does not open progress');
+    assert(!$('tray').hidden);
+    key('keydown', 'Escape');
     $('journal-button').click();
     assert.equal($('tray-content').querySelector('[data-tab="guide"]').getAttribute('aria-pressed'), 'true');
     assert.equal($('tray-content').querySelector('[data-tab="guide"]').textContent, 'How to play');
